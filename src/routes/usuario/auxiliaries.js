@@ -31,7 +31,7 @@ async function createOne(data) {
   const password_hash = await bcrypt.hash(password, 10);
   const payload = { ...rest, password_hash };
   const insert = buildInsert(payload, [...INSERT_FIELDS, 'password_hash']);
-  if (!insert) throw Object.assign(new Error('No data to insert'), { status: 400 });
+  if (!insert) throw Object.assign(new Error('No se enviaron datos para guardar.'), { status: 400 });
   const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
   const [result] = await pool.query(sql, insert.values);
   return getById(result.insertId);
@@ -44,7 +44,7 @@ async function updateOne(id, data) {
     delete next.password;
   }
   const upd = buildUpdateSet(next, [...UPDATE_FIELDS, 'password_hash']);
-  if (!upd) throw Object.assign(new Error('No data to update'), { status: 400 });
+  if (!upd) throw Object.assign(new Error('No se enviaron datos para actualizar.'), { status: 400 });
   const sql = `UPDATE \`${TABLE}\` SET ${upd.set} WHERE id = :id`;
   const [result] = await pool.query(sql, { ...upd.values, id });
   if (result.affectedRows === 0) return null;

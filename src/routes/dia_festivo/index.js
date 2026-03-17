@@ -62,7 +62,7 @@ router.get('/:id', validate(idParam, 'params'), asyncHandler(async (req, res) =>
     'SELECT id, fecha, descripcion, created_at, updated_at FROM dia_festivo WHERE id = :id LIMIT 1',
     { id }
   );
-  if (!row) return res.status(404).json({ message: 'Not found' });
+  if (!row) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
   res.json(row);
 }));
 
@@ -101,14 +101,14 @@ router.put('/:id', validate(idParam, 'params'), validate(updateSchema), asyncHan
     fields.push('descripcion = :descripcion');
     params.descripcion = descripcion;
   }
-  if (!fields.length) return res.status(400).json({ message: 'No data to update' });
+  if (!fields.length) return res.status(400).json({ message: 'No se enviaron datos para actualizar.' });
 
   try {
     const [result] = await pool.query(
       `UPDATE dia_festivo SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = :id`,
       params
     );
-    if (result.affectedRows === 0) return res.status(404).json({ message: 'Not found' });
+    if (result.affectedRows === 0) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
 
     const [[row]] = await pool.query(
       'SELECT id, fecha, descripcion, created_at, updated_at FROM dia_festivo WHERE id = :id LIMIT 1',
@@ -126,7 +126,7 @@ router.put('/:id', validate(idParam, 'params'), validate(updateSchema), asyncHan
 router.delete('/:id', validate(idParam, 'params'), asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
   const [result] = await pool.query('DELETE FROM dia_festivo WHERE id = :id', { id });
-  if (result.affectedRows === 0) return res.status(404).json({ message: 'Not found' });
+  if (result.affectedRows === 0) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
   res.status(204).send();
 }));
 

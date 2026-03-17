@@ -27,7 +27,7 @@ async function getById(id) {
 
 async function createOne(data) {
   const insert = buildInsert(data, INSERT_FIELDS);
-  if (!insert) throw Object.assign(new Error('No data to insert'), { status: 400 });
+  if (!insert) throw Object.assign(new Error('No se enviaron datos para guardar.'), { status: 400 });
   const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
   const [result] = await pool.query(sql, insert.values);
   return getById(result.insertId);
@@ -35,7 +35,7 @@ async function createOne(data) {
 
 async function updateOne(id, data) {
   const upd = buildUpdateSet(data, UPDATE_FIELDS);
-  if (!upd) throw Object.assign(new Error('No data to update'), { status: 400 });
+  if (!upd) throw Object.assign(new Error('No se enviaron datos para actualizar.'), { status: 400 });
   const sql = `UPDATE \`${TABLE}\` SET ${upd.set} WHERE id = :id`;
   const [result] = await pool.query(sql, { ...upd.values, id });
   if (result.affectedRows === 0) return null;

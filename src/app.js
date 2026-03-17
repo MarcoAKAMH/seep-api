@@ -25,7 +25,7 @@ app.use(cors({
     // allow same-origin (no Origin header) and explicit allowlist
     if (!origin) return cb(null, true);
     if (list.includes(origin)) return cb(null, true);
-    return cb(new Error('Not allowed by CORS'));
+    return cb(new Error('Origen no permitido por la configuracion de CORS'));
   },
   credentials: true,
 }));

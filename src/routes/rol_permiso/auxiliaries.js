@@ -27,7 +27,7 @@ async function getByKey(keys) {
 
 async function createOne(data) {
   const insert = buildInsert(data, INSERT_FIELDS);
-  if (!insert) throw Object.assign(new Error('No data to insert'), { status: 400 });
+  if (!insert) throw Object.assign(new Error('No se enviaron datos para guardar.'), { status: 400 });
   const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
   const [result] = await pool.query(sql, insert.values);
   return getByKey({ rol_id: insert.values['rol_id'], permiso_id: insert.values['permiso_id'] });

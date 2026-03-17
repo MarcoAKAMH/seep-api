@@ -10,6 +10,7 @@ const { required } = require('../../middleware/auth');
 const { generateOpaqueToken, sha256Hex, getCookie, nowUtcDate, addDays } = require('../../utils/refreshTokens');
 
 const router = express.Router();
+const LOGIN_ERROR_MESSAGE = 'Error de validacion. Verifica tus credenciales.';
 
 // ---- Config ----
 const REFRESH_COOKIE_NAME = process.env.REFRESH_COOKIE_NAME || 'seep_rt';
@@ -112,19 +113,26 @@ async function issueTokens({ res, user, remember, req }) {
 router.post(
   '/login',
   rateLimit({ keyPrefix: 'login', windowMs: 15 * 60 * 1000, max: 20 }),
-  validate(loginSchema),
   asyncHandler(async (req, res) => {
-    const { correo, password, remember } = req.body;
+    const { error, value } = loginSchema.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) return res.status(401).json({ message: LOGIN_ERROR_MESSAGE });
+
+    const { correo, password, remember } = value;
 
     const [rows] = await pool.query(
       'SELECT id, correo, password_hash, nombre, activo FROM usuario WHERE correo = :correo LIMIT 1',
       { correo }
     );
     const user = rows[0];
-    if (!user || !user.activo) return res.status(401).json({ message: 'Credenciales inválidas' });
+    if (!user || !user.activo) return res.status(401).json({ message: LOGIN_ERROR_MESSAGE });
 
     const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).json({ message: 'Credenciales inválidas' });
+    if (!ok) return res.status(401).json({ message: LOGIN_ERROR_MESSAGE });
 
     const { accessToken } = await issueTokens({ res, user, remember, req });
 
@@ -140,7 +148,7 @@ router.post(
   rateLimit({ keyPrefix: 'refresh', windowMs: 5 * 60 * 1000, max: 60 }),
   asyncHandler(async (req, res) => {
     const rt = getCookie(req, REFRESH_COOKIE_NAME);
-    if (!rt) return res.status(401).json({ message: 'No refresh token' });
+    if (!rt) return res.status(401).json({ message: 'No se envio el refresh token.' });
 
     const hash = sha256Hex(rt);
 
@@ -157,7 +165,7 @@ router.post(
     // Token not found -> maybe cleared cookie or invalid.
     if (!record) {
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'Invalid refresh token' });
+      return res.status(401).json({ message: 'El refresh token es invalido.' });
     }
 
     // If revoked and still presented => possible token reuse / stolen token.
@@ -170,14 +178,14 @@ router.post(
         { usuario_id: record.usuario_id }
       );
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'Refresh token revoked' });
+      return res.status(401).json({ message: 'El refresh token fue revocado.' });
     }
 
     // Expired
     if (record.expires_at && new Date(record.expires_at).getTime() <= Date.now()) {
       await pool.query('UPDATE auth_refresh_token SET revoked_at = NOW() WHERE id = :id', { id: record.id });
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'Refresh token expired' });
+      return res.status(401).json({ message: 'El refresh token ya expiro.' });
     }
 
     // Rotate refresh token
@@ -206,7 +214,7 @@ router.post(
 
     if (remainingMs <= 0) {
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'Refresh token expired' });
+      return res.status(401).json({ message: 'El refresh token ya expiro.' });
     }
 
     await pool.query(
