@@ -47,7 +47,6 @@ router.get('/summary', required, async (req, res, next) => {
     const [recentOrders] = await pool.query(`
       SELECT
         ot.id,
-        ot.folio,
         ot.fecha_ingreso,
         c.nombre AS cliente,
         COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
@@ -88,7 +87,6 @@ router.get('/summary', required, async (req, res, next) => {
       })),
       recentOrders: recentOrders.map((r) => ({
         id: Number(r.id),
-        folio: r.folio,
         fecha_ingreso: r.fecha_ingreso,
         cliente: r.cliente,
         estatus: r.estatus,

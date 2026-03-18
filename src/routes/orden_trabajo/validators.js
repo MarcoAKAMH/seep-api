@@ -12,7 +12,6 @@ const idParam = Joi.object({
 });
 
 const create = Joi.object({
-  folio: Joi.string().max(40).required(),
   cliente_id: Joi.number().integer().min(1).max(MAX_ID).required(),
   vehiculo_id: Joi.number().integer().min(1).max(MAX_ID).allow(null).optional(),
   estatus_id: Joi.number().integer().min(1).max(MAX_ID).required(),
@@ -34,10 +33,17 @@ const create = Joi.object({
   orden_texto: Joi.string().max(120).allow(null).optional(),
   causa: Joi.string().max(200).allow(null).optional(),
   total: Joi.number().precision(2).allow(null).optional(),
+  tecnicos_reparadores_ids: Joi.array()
+    .items(Joi.number().integer().min(1).max(MAX_ID))
+    .unique()
+    .optional(),
+  tecnicos_desmonte_ids: Joi.array()
+    .items(Joi.number().integer().min(1).max(MAX_ID))
+    .unique()
+    .optional(),
 });
 
 const update = Joi.object({
-  folio: Joi.string().max(40).optional(),
   cliente_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
   vehiculo_id: Joi.number().integer().min(1).max(MAX_ID).allow(null).optional(),
   estatus_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
@@ -59,6 +65,14 @@ const update = Joi.object({
   orden_texto: Joi.string().max(120).allow(null).optional(),
   causa: Joi.string().max(200).allow(null).optional(),
   total: Joi.number().precision(2).allow(null).optional(),
+  tecnicos_reparadores_ids: Joi.array()
+    .items(Joi.number().integer().min(1).max(MAX_ID))
+    .unique()
+    .optional(),
+  tecnicos_desmonte_ids: Joi.array()
+    .items(Joi.number().integer().min(1).max(MAX_ID))
+    .unique()
+    .optional(),
 }).min(1);
 
 module.exports = { listQuery, create, update, idParam };
