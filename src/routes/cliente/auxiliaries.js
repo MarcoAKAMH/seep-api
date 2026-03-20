@@ -3,9 +3,9 @@ const { buildUpdateSet, buildInsert } = require('../../utils/sql');
 
 const TABLE = 'cliente';
 const PK = ["id"];
-const SELECT_FIELDS = ["id", "tipo_cliente_id", "nombre", "clave_unica", "created_at", "updated_at"];
-const INSERT_FIELDS = ["tipo_cliente_id", "nombre", "clave_unica"];
-const UPDATE_FIELDS = ["tipo_cliente_id", "nombre", "clave_unica"];
+const SELECT_FIELDS = ["id", "tipo_cliente_id", "nombre", "created_at", "updated_at"];
+const INSERT_FIELDS = ["tipo_cliente_id", "nombre"];
+const UPDATE_FIELDS = ["tipo_cliente_id", "nombre"];
 
 function columnList(fields) {
   return fields.map(f => `\`${f}\``).join(', ');

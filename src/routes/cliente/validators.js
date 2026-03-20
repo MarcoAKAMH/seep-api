@@ -14,13 +14,11 @@ const idParam = Joi.object({
 const create = Joi.object({
   tipo_cliente_id: Joi.number().integer().min(1).max(MAX_ID).required(),
   nombre: Joi.string().max(180).required(),
-  clave_unica: Joi.string().max(400).required(),
 });
 
 const update = Joi.object({
   tipo_cliente_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
   nombre: Joi.string().max(180).optional(),
-  clave_unica: Joi.string().max(400).optional(),
 }).min(1);
 
 module.exports = { listQuery, create, update, idParam };
