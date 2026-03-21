@@ -5,6 +5,8 @@ const TABLE = 'orden_trabajo';
 const ASIGNACION_TABLE = 'orden_asignacion';
 const GARANTIA_TABLE = 'garantia';
 const ENCUESTA_TABLE = 'encuesta_satisfaccion';
+const VEHICULO_TABLE = 'vehiculo';
+const CATEGORIA_TABLE = 'cat_categoria_vehiculo';
 const PK = ["id"];
 const SELECT_FIELDS = ["id", "cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "horas_permanencia", "reproceso", "a_tiempo", "valor_mano_obra", "valor_repuestos", "valor_reparacion", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "orden_texto", "causa", "total", "created_at", "updated_at"];
 const INSERT_FIELDS = ["cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "horas_permanencia", "reproceso", "a_tiempo", "valor_mano_obra", "valor_repuestos", "valor_reparacion", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "orden_texto", "causa", "total"];
@@ -12,6 +14,73 @@ const UPDATE_FIELDS = ["cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso
 
 function columnList(fields) {
   return fields.map(f => `\`${f}\``).join(', ');
+}
+
+async function getVehiculoWithCategoria(connection, vehiculoId) {
+  const [rows] = await connection.query(
+    `SELECT v.\`id\`, v.\`cliente_id\`, v.\`categoria_id\`, c.\`nombre\` AS categoria_nombre
+       FROM \`${VEHICULO_TABLE}\` v
+       LEFT JOIN \`${CATEGORIA_TABLE}\` c ON c.\`id\` = v.\`categoria_id\`
+      WHERE v.\`id\` = :id
+      LIMIT 1`,
+    { id: vehiculoId },
+  );
+
+  return rows[0] || null;
+}
+
+async function normalizeOrdenData(connection, data, currentOrder = null) {
+  const normalized = { ...data };
+  const clienteId = normalized.cliente_id ?? currentOrder?.cliente_id ?? null;
+  const vehiculoId =
+    Object.prototype.hasOwnProperty.call(normalized, 'vehiculo_id')
+      ? normalized.vehiculo_id
+      : (currentOrder?.vehiculo_id ?? null);
+
+  if (vehiculoId) {
+    const vehiculo = await getVehiculoWithCategoria(connection, vehiculoId);
+    if (!vehiculo) {
+      throw Object.assign(new Error('El vehiculo seleccionado no existe.'), { status: 400 });
+    }
+
+    if (clienteId && Number(vehiculo.cliente_id) !== Number(clienteId)) {
+      throw Object.assign(new Error('El vehiculo seleccionado no pertenece al cliente indicado.'), { status: 400 });
+    }
+
+    if (!vehiculo.categoria_nombre) {
+      throw Object.assign(new Error('El vehiculo seleccionado no tiene una categoria valida.'), { status: 400 });
+    }
+
+    normalized.tipo_reparacion_id = vehiculo.categoria_id;
+    return normalized;
+  }
+
+  const tipoReparacionId =
+    Object.prototype.hasOwnProperty.call(normalized, 'tipo_reparacion_id')
+      ? normalized.tipo_reparacion_id
+      : (currentOrder?.tipo_reparacion_id ?? null);
+
+  if (!tipoReparacionId) {
+    throw Object.assign(new Error('Selecciona un vehiculo o el tipo de reparacion Material suelto.'), { status: 400 });
+  }
+
+  const [rows] = await connection.query(
+    `SELECT \`id\`, \`nombre\`
+       FROM \`${CATEGORIA_TABLE}\`
+      WHERE \`id\` = :id
+      LIMIT 1`,
+    { id: tipoReparacionId },
+  );
+
+  if (rows.length === 0) {
+    throw Object.assign(new Error('El tipo de reparacion seleccionado no existe.'), { status: 400 });
+  }
+
+  if (String(rows[0].nombre || '').trim().toLowerCase() !== 'material suelto') {
+    throw Object.assign(new Error('Solo se puede omitir el vehiculo cuando la orden es de tipo Material suelto.'), { status: 400 });
+  }
+
+  return normalized;
 }
 
 function buildAsignaciones(reparadores = [], desmontes = []) {
@@ -60,13 +129,15 @@ async function getById(id) {
 
 async function createOne(data) {
   const { tecnicos_reparadores_ids, tecnicos_desmonte_ids, ...ordenData } = data;
-  const insert = buildInsert(ordenData, INSERT_FIELDS);
-  if (!insert) throw Object.assign(new Error('No se enviaron datos para guardar.'), { status: 400 });
-  const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    const normalizedOrdenData = await normalizeOrdenData(connection, ordenData);
+    const insert = buildInsert(normalizedOrdenData, INSERT_FIELDS);
+    if (!insert) throw Object.assign(new Error('No se enviaron datos para guardar.'), { status: 400 });
+    const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
 
     const [result] = await connection.query(sql, insert.values);
     const ordenId = result.insertId;
@@ -91,9 +162,8 @@ async function updateOne(id, data) {
   } = data;
   const shouldReplaceAsignaciones =
     tecnicos_reparadores_ids !== undefined || tecnicos_desmonte_ids !== undefined;
-  const upd = buildUpdateSet(ordenData, UPDATE_FIELDS);
 
-  if (!upd && !shouldReplaceAsignaciones) {
+  if (Object.keys(ordenData).length === 0 && !shouldReplaceAsignaciones) {
     throw Object.assign(new Error('No se enviaron datos para actualizar.'), { status: 400 });
   }
 
@@ -101,19 +171,22 @@ async function updateOne(id, data) {
   try {
     await connection.beginTransaction();
 
+    const currentOrder = await getById(id);
+    if (!currentOrder) {
+      await connection.rollback();
+      return null;
+    }
+
+    const normalizedOrdenData =
+      Object.keys(ordenData).length > 0
+        ? await normalizeOrdenData(connection, ordenData, currentOrder)
+        : null;
+    const upd = normalizedOrdenData ? buildUpdateSet(normalizedOrdenData, UPDATE_FIELDS) : null;
+
     if (upd) {
       const sql = `UPDATE \`${TABLE}\` SET ${upd.set} WHERE id = :id`;
       const [result] = await connection.query(sql, { ...upd.values, id });
       if (result.affectedRows === 0) {
-        await connection.rollback();
-        return null;
-      }
-    } else {
-      const [rows] = await connection.query(
-        `SELECT \`id\` FROM \`${TABLE}\` WHERE \`id\` = :id LIMIT 1`,
-        { id },
-      );
-      if (rows.length === 0) {
         await connection.rollback();
         return null;
       }
