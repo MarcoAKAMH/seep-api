@@ -91,12 +91,14 @@
 | `cat_tipo_cliente` | `/api/cat_tipo_cliente` | id | nombre |
 | `cat_estatus_orden` | `/api/cat_estatus_orden` | id | nombre |
 | `cat_categoria_vehiculo` | `/api/cat_categoria_vehiculo` | id | nombre |
+| `cat_sucursal` | `/api/cat_sucursal` | id | nombre |
 | `cat_tipo_reparacion` | `/api/cat_tipo_reparacion` | id | nombre |
 | `cat_calidad` | `/api/cat_calidad` | id | nombre |
 | `empleado` | `/api/empleado` | id | nombre |
 | `cliente` | `/api/cliente` | id | tipo_cliente_id, nombre, clave_unica |
 | `vehiculo` | `/api/vehiculo` | id | cliente_id, clave_unica |
 | `orden_trabajo` | `/api/orden_trabajo` | id | folio, cliente_id, estatus_id, fecha_ingreso |
+| `orden_sucursal` | `/api/orden_sucursal` | id | orden_id, sucursal_id |
 | `orden_asignacion` | `/api/orden_asignacion` | id | orden_id, empleado_id, rol_en_orden |
 | `encuesta_satisfaccion` | `/api/encuesta_satisfaccion` | id | orden_id |
 | `garantia` | `/api/garantia` | id | orden_id |
@@ -211,4 +213,3 @@ mysql -h 127.0.0.1 -P 3306 -u root -p seep_taller < sql/2026_03_auth_refresh_tok
 
 > En producción usa HTTPS y define `CORS_ORIGIN` con tu URL exacta de frontend, por ejemplo:
 > `CORS_ORIGIN=https://panel.seep.com.mx`
-

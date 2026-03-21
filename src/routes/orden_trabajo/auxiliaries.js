@@ -3,10 +3,12 @@ const { buildUpdateSet, buildInsert } = require('../../utils/sql');
 
 const TABLE = 'orden_trabajo';
 const ASIGNACION_TABLE = 'orden_asignacion';
+const ORDEN_SUCURSAL_TABLE = 'orden_sucursal';
 const GARANTIA_TABLE = 'garantia';
 const ENCUESTA_TABLE = 'encuesta_satisfaccion';
 const VEHICULO_TABLE = 'vehiculo';
 const CATEGORIA_TABLE = 'cat_categoria_vehiculo';
+const SUCURSAL_TABLE = 'cat_sucursal';
 const PK = ["id"];
 const SELECT_FIELDS = ["id", "cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "horas_permanencia", "reproceso", "a_tiempo", "valor_mano_obra", "valor_repuestos", "valor_reparacion", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "orden_texto", "causa", "total", "created_at", "updated_at"];
 const INSERT_FIELDS = ["cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "horas_permanencia", "reproceso", "a_tiempo", "valor_mano_obra", "valor_repuestos", "valor_reparacion", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "orden_texto", "causa", "total"];
@@ -27,6 +29,17 @@ async function getVehiculoWithCategoria(connection, vehiculoId) {
   );
 
   return rows[0] || null;
+}
+
+async function sucursalExists(connection, sucursalId) {
+  const [rows] = await connection.query(
+    `SELECT \`id\`
+       FROM \`${SUCURSAL_TABLE}\`
+      WHERE \`id\` = :id
+      LIMIT 1`,
+    { id: sucursalId },
+  );
+  return rows.length > 0;
 }
 
 async function normalizeOrdenData(connection, data, currentOrder = null) {
@@ -83,6 +96,42 @@ async function normalizeOrdenData(connection, data, currentOrder = null) {
   return normalized;
 }
 
+async function replaceSucursal(connection, ordenId, sucursalId) {
+  await connection.query(
+    `DELETE FROM \`${ORDEN_SUCURSAL_TABLE}\` WHERE \`orden_id\` = :orden_id`,
+    { orden_id: ordenId },
+  );
+
+  if (!sucursalId) return;
+
+  await connection.query(
+    `INSERT INTO \`${ORDEN_SUCURSAL_TABLE}\` (\`orden_id\`, \`sucursal_id\`) VALUES (:orden_id, :sucursal_id)`,
+    { orden_id: ordenId, sucursal_id: sucursalId },
+  );
+}
+
+async function hydrateSucursales(rows) {
+  if (!rows.length) return rows;
+
+  const ordenIds = rows.map((row) => row.id);
+  const [sucursales] = await pool.query(
+    `SELECT \`orden_id\`, \`sucursal_id\`
+       FROM \`${ORDEN_SUCURSAL_TABLE}\`
+      WHERE \`orden_id\` IN (?)`,
+    [ordenIds],
+  );
+
+  const sucursalIdByOrdenId = new Map();
+  sucursales.forEach((row) => {
+    sucursalIdByOrdenId.set(row.orden_id, row.sucursal_id);
+  });
+
+  return rows.map((row) => ({
+    ...row,
+    sucursal_id: sucursalIdByOrdenId.get(row.id) ?? null,
+  }));
+}
+
 function buildAsignaciones(reparadores = [], desmontes = []) {
   const rows = [];
 
@@ -117,22 +166,27 @@ async function list({ limit = 50, offset = 0 }) {
   const cols = columnList(SELECT_FIELDS);
   const sql = `SELECT ${cols} FROM \`${TABLE}\` LIMIT :limit OFFSET :offset`;
   const [rows] = await pool.query(sql, { limit, offset });
-  return rows;
+  return hydrateSucursales(rows);
 }
 
 async function getById(id) {
   const cols = columnList(SELECT_FIELDS);
   const sql = `SELECT ${cols} FROM \`${TABLE}\` WHERE id = :id LIMIT 1`;
   const [rows] = await pool.query(sql, { id });
-  return rows[0] || null;
+  const hydratedRows = await hydrateSucursales(rows);
+  return hydratedRows[0] || null;
 }
 
 async function createOne(data) {
-  const { tecnicos_reparadores_ids, tecnicos_desmonte_ids, ...ordenData } = data;
+  const { sucursal_id, tecnicos_reparadores_ids, tecnicos_desmonte_ids, ...ordenData } = data;
 
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    if (!sucursal_id || !(await sucursalExists(connection, sucursal_id))) {
+      throw Object.assign(new Error('Selecciona una sucursal valida.'), { status: 400 });
+    }
 
     const normalizedOrdenData = await normalizeOrdenData(connection, ordenData);
     const insert = buildInsert(normalizedOrdenData, INSERT_FIELDS);
@@ -142,6 +196,7 @@ async function createOne(data) {
     const [result] = await connection.query(sql, insert.values);
     const ordenId = result.insertId;
 
+    await replaceSucursal(connection, ordenId, sucursal_id);
     await replaceAsignaciones(connection, ordenId, tecnicos_reparadores_ids, tecnicos_desmonte_ids);
 
     await connection.commit();
@@ -156,14 +211,16 @@ async function createOne(data) {
 
 async function updateOne(id, data) {
   const {
+    sucursal_id,
     tecnicos_reparadores_ids,
     tecnicos_desmonte_ids,
     ...ordenData
   } = data;
+  const shouldReplaceSucursal = Object.prototype.hasOwnProperty.call(data, 'sucursal_id');
   const shouldReplaceAsignaciones =
     tecnicos_reparadores_ids !== undefined || tecnicos_desmonte_ids !== undefined;
 
-  if (Object.keys(ordenData).length === 0 && !shouldReplaceAsignaciones) {
+  if (Object.keys(ordenData).length === 0 && !shouldReplaceAsignaciones && !shouldReplaceSucursal) {
     throw Object.assign(new Error('No se enviaron datos para actualizar.'), { status: 400 });
   }
 
@@ -175,6 +232,12 @@ async function updateOne(id, data) {
     if (!currentOrder) {
       await connection.rollback();
       return null;
+    }
+
+    if (shouldReplaceSucursal) {
+      if (!sucursal_id || !(await sucursalExists(connection, sucursal_id))) {
+        throw Object.assign(new Error('Selecciona una sucursal valida.'), { status: 400 });
+      }
     }
 
     const normalizedOrdenData =
@@ -190,6 +253,10 @@ async function updateOne(id, data) {
         await connection.rollback();
         return null;
       }
+    }
+
+    if (shouldReplaceSucursal) {
+      await replaceSucursal(connection, id, sucursal_id);
     }
 
     if (shouldReplaceAsignaciones) {
@@ -212,6 +279,10 @@ async function removeOne(id) {
   try {
     await connection.beginTransaction();
 
+    await connection.query(
+      `DELETE FROM \`${ORDEN_SUCURSAL_TABLE}\` WHERE \`orden_id\` = :orden_id`,
+      { orden_id: id },
+    );
     await connection.query(
       `DELETE FROM \`${ASIGNACION_TABLE}\` WHERE \`orden_id\` = :orden_id`,
       { orden_id: id },

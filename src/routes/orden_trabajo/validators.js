@@ -13,6 +13,7 @@ const idParam = Joi.object({
 
 const create = Joi.object({
   cliente_id: Joi.number().integer().min(1).max(MAX_ID).required(),
+  sucursal_id: Joi.number().integer().min(1).max(MAX_ID).required(),
   vehiculo_id: Joi.number().integer().min(1).max(MAX_ID).allow(null).optional(),
   estatus_id: Joi.number().integer().min(1).max(MAX_ID).required(),
   fecha_ingreso: Joi.date().iso().required(),
@@ -45,6 +46,7 @@ const create = Joi.object({
 
 const update = Joi.object({
   cliente_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
+  sucursal_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
   vehiculo_id: Joi.number().integer().min(1).max(MAX_ID).allow(null).optional(),
   estatus_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
   fecha_ingreso: Joi.date().iso().optional(),
