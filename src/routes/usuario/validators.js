@@ -16,6 +16,11 @@ const create = Joi.object({
   nombre: Joi.string().max(160).required(),
   activo: Joi.boolean().truthy(1).falsy(0).optional(),
   password: Joi.string().min(8).max(200).required(),
+  role_ids: Joi.array()
+    .items(Joi.number().integer().min(1).max(MAX_ID))
+    .unique()
+    .min(1)
+    .required(),
 });
 
 const update = Joi.object({
@@ -23,6 +28,11 @@ const update = Joi.object({
   nombre: Joi.string().max(160).optional(),
   activo: Joi.boolean().truthy(1).falsy(0).optional(),
   password: Joi.string().min(8).max(200).optional(),
+  role_ids: Joi.array()
+    .items(Joi.number().integer().min(1).max(MAX_ID))
+    .unique()
+    .min(1)
+    .optional(),
 }).min(1);
 
 module.exports = { listQuery, create, update, idParam };

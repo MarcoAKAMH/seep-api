@@ -14,8 +14,28 @@ const SELECT_FIELDS = ["id", "cliente_id", "vehiculo_id", "estatus_id", "fecha_i
 const INSERT_FIELDS = ["cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "horas_permanencia", "reproceso", "a_tiempo", "valor_mano_obra", "valor_repuestos", "valor_reparacion", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "orden_texto", "causa", "total"];
 const UPDATE_FIELDS = ["cliente_id", "vehiculo_id", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "horas_permanencia", "reproceso", "a_tiempo", "valor_mano_obra", "valor_repuestos", "valor_reparacion", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "orden_texto", "causa", "total"];
 
-function columnList(fields) {
-  return fields.map(f => `\`${f}\``).join(', ');
+function columnList(fields, tableAlias = null) {
+  if (!tableAlias) return fields.map(f => `\`${f}\``).join(', ');
+  return fields.map((f) => `${tableAlias}.\`${f}\``).join(', ');
+}
+
+function getAllowedSucursalIds(user) {
+  return Array.isArray(user?.allowed_sucursal_ids)
+    ? user.allowed_sucursal_ids.map((id) => Number(id)).filter(Boolean)
+    : [];
+}
+
+function canViewAllOrders(user) {
+  return Boolean(user?.is_admin || user?.can_view_all_orders);
+}
+
+function assertSucursalAccess(user, sucursalId) {
+  if (canViewAllOrders(user)) return;
+
+  const allowedSucursalIds = getAllowedSucursalIds(user);
+  if (!allowedSucursalIds.includes(Number(sucursalId))) {
+    throw Object.assign(new Error('No tienes permisos para operar órdenes de esta sucursal.'), { status: 403 });
+  }
 }
 
 async function getVehiculoWithCategoria(connection, vehiculoId) {
@@ -162,22 +182,48 @@ async function replaceAsignaciones(connection, ordenId, reparadores = [], desmon
   );
 }
 
-async function list({ limit = 50, offset = 0 }) {
-  const cols = columnList(SELECT_FIELDS);
-  const sql = `SELECT ${cols} FROM \`${TABLE}\` LIMIT :limit OFFSET :offset`;
-  const [rows] = await pool.query(sql, { limit, offset });
+async function list({ limit = 50, offset = 0 }, user) {
+  const cols = columnList(SELECT_FIELDS, 'ot');
+  let sql = `SELECT ${cols} FROM \`${TABLE}\` ot`;
+  const queryParams = [];
+
+  if (!canViewAllOrders(user)) {
+    const allowedSucursalIds = getAllowedSucursalIds(user);
+    if (allowedSucursalIds.length === 0) return [];
+    sql += ` INNER JOIN \`${ORDEN_SUCURSAL_TABLE}\` os ON os.\`orden_id\` = ot.\`id\`
+             WHERE os.\`sucursal_id\` IN (?)`;
+    queryParams.push(allowedSucursalIds);
+  }
+
+  sql += ` LIMIT ? OFFSET ?`;
+  queryParams.push(limit, offset);
+  const [rows] = await pool.query(sql, queryParams);
   return hydrateSucursales(rows);
 }
 
-async function getById(id) {
-  const cols = columnList(SELECT_FIELDS);
-  const sql = `SELECT ${cols} FROM \`${TABLE}\` WHERE id = :id LIMIT 1`;
-  const [rows] = await pool.query(sql, { id });
+async function getById(id, user) {
+  const cols = columnList(SELECT_FIELDS, 'ot');
+  let sql = `SELECT ${cols} FROM \`${TABLE}\` ot WHERE ot.\`id\` = ?`;
+  const queryParams = [id];
+
+  if (!canViewAllOrders(user)) {
+    const allowedSucursalIds = getAllowedSucursalIds(user);
+    if (allowedSucursalIds.length === 0) return null;
+    sql = `SELECT ${cols}
+             FROM \`${TABLE}\` ot
+             INNER JOIN \`${ORDEN_SUCURSAL_TABLE}\` os ON os.\`orden_id\` = ot.\`id\`
+            WHERE ot.\`id\` = ?
+              AND os.\`sucursal_id\` IN (?)`;
+    queryParams.push(allowedSucursalIds);
+  }
+
+  sql += ' LIMIT 1';
+  const [rows] = await pool.query(sql, queryParams);
   const hydratedRows = await hydrateSucursales(rows);
   return hydratedRows[0] || null;
 }
 
-async function createOne(data) {
+async function createOne(data, user) {
   const { sucursal_id, tecnicos_reparadores_ids, tecnicos_desmonte_ids, ...ordenData } = data;
 
   const connection = await pool.getConnection();
@@ -187,6 +233,7 @@ async function createOne(data) {
     if (!sucursal_id || !(await sucursalExists(connection, sucursal_id))) {
       throw Object.assign(new Error('Selecciona una sucursal valida.'), { status: 400 });
     }
+    assertSucursalAccess(user, sucursal_id);
 
     const normalizedOrdenData = await normalizeOrdenData(connection, ordenData);
     const insert = buildInsert(normalizedOrdenData, INSERT_FIELDS);
@@ -200,7 +247,7 @@ async function createOne(data) {
     await replaceAsignaciones(connection, ordenId, tecnicos_reparadores_ids, tecnicos_desmonte_ids);
 
     await connection.commit();
-    return getById(ordenId);
+    return getById(ordenId, user);
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -209,7 +256,7 @@ async function createOne(data) {
   }
 }
 
-async function updateOne(id, data) {
+async function updateOne(id, data, user) {
   const {
     sucursal_id,
     tecnicos_reparadores_ids,
@@ -228,7 +275,7 @@ async function updateOne(id, data) {
   try {
     await connection.beginTransaction();
 
-    const currentOrder = await getById(id);
+    const currentOrder = await getById(id, user);
     if (!currentOrder) {
       await connection.rollback();
       return null;
@@ -238,6 +285,7 @@ async function updateOne(id, data) {
       if (!sucursal_id || !(await sucursalExists(connection, sucursal_id))) {
         throw Object.assign(new Error('Selecciona una sucursal valida.'), { status: 400 });
       }
+      assertSucursalAccess(user, sucursal_id);
     }
 
     const normalizedOrdenData =
@@ -271,10 +319,13 @@ async function updateOne(id, data) {
     connection.release();
   }
 
-  return getById(id);
+  return getById(id, user);
 }
 
-async function removeOne(id) {
+async function removeOne(id, user) {
+  const currentOrder = await getById(id, user);
+  if (!currentOrder) return false;
+
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();

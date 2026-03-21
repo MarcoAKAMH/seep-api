@@ -1,7 +1,7 @@
 const express = require('express');
 const asyncHandler = require('../../utils/asyncHandler');
 const validate = require('../../middleware/validate');
-const { required } = require('../../middleware/auth');
+const { required, adminOnly } = require('../../middleware/auth');
 const v = require('./validators');
 const aux = require('./auxiliaries');
 
@@ -19,6 +19,8 @@ router.get('/:id', validate(v.idParam, 'params'), asyncHandler(async (req, res) 
   if (!row) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
   res.json(row);
 }));
+
+router.use(adminOnly);
 
 router.post('/', validate(v.create), asyncHandler(async (req, res) => {
   const created = await aux.createOne(req.body);

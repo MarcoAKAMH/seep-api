@@ -19,45 +19,109 @@ function countNonSundayDaysInMonth(anio, mes) {
   return count;
 }
 
+function getAllowedSucursalIds(user) {
+  return Array.isArray(user?.allowed_sucursal_ids)
+    ? user.allowed_sucursal_ids.map((id) => Number(id)).filter(Boolean)
+    : [];
+}
+
 // GET /api/dashboard/summary
 router.get('/summary', required, async (req, res, next) => {
   try {
+    const canViewAllOrders = Boolean(req.user?.is_admin || req.user?.can_view_all_orders);
+    const allowedSucursalIds = getAllowedSucursalIds(req.user);
+    const shouldRestrictOrders = !canViewAllOrders;
+    const hasOrderAccess = canViewAllOrders || allowedSucursalIds.length > 0;
+
     const [[clientesRow]] = await pool.query('SELECT COUNT(*) AS clientes FROM cliente');
-    const [[ordenesRow]] = await pool.query('SELECT COUNT(*) AS ordenes FROM orden_trabajo');
+    const [[ordenesRow]] = hasOrderAccess
+      ? await pool.query(
+          shouldRestrictOrders
+            ? `SELECT COUNT(*) AS ordenes
+                 FROM orden_trabajo ot
+                 INNER JOIN orden_sucursal os ON os.orden_id = ot.id
+                WHERE os.sucursal_id IN (?)`
+            : 'SELECT COUNT(*) AS ordenes FROM orden_trabajo',
+          shouldRestrictOrders ? [allowedSucursalIds] : [],
+        )
+      : [[{ ordenes: 0 }]];
 
-    const [[moneyRow]] = await pool.query(`
-      SELECT
-        SUM(CASE WHEN IFNULL(facturado,0) = 1 THEN COALESCE(total,0) ELSE 0 END) AS facturado,
-        SUM(CASE WHEN IFNULL(facturado,0) = 0 THEN COALESCE(total,0) ELSE 0 END) AS porFacturar
-      FROM orden_trabajo
-    `);
+    const [[moneyRow]] = hasOrderAccess
+      ? await pool.query(
+          shouldRestrictOrders
+            ? `SELECT
+                 SUM(CASE WHEN IFNULL(ot.facturado,0) = 1 THEN COALESCE(ot.total,0) ELSE 0 END) AS facturado,
+                 SUM(CASE WHEN IFNULL(ot.facturado,0) = 0 THEN COALESCE(ot.total,0) ELSE 0 END) AS porFacturar
+               FROM orden_trabajo ot
+               INNER JOIN orden_sucursal os ON os.orden_id = ot.id
+               WHERE os.sucursal_id IN (?)`
+            : `SELECT
+                 SUM(CASE WHEN IFNULL(facturado,0) = 1 THEN COALESCE(total,0) ELSE 0 END) AS facturado,
+                 SUM(CASE WHEN IFNULL(facturado,0) = 0 THEN COALESCE(total,0) ELSE 0 END) AS porFacturar
+               FROM orden_trabajo`,
+          shouldRestrictOrders ? [allowedSucursalIds] : [],
+        )
+      : [[{ facturado: 0, porFacturar: 0 }]];
 
-    const [ordersByStatus] = await pool.query(`
-      SELECT
-        ot.estatus_id AS estatus_id,
-        COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
-        COUNT(*) AS count,
-        COALESCE(SUM(ot.total),0) AS total
-      FROM orden_trabajo ot
-      LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
-      GROUP BY ot.estatus_id, estatus
-      ORDER BY count DESC
-    `);
+    const [ordersByStatus] = hasOrderAccess
+      ? await pool.query(
+          shouldRestrictOrders
+            ? `SELECT
+                 ot.estatus_id AS estatus_id,
+                 COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
+                 COUNT(*) AS count,
+                 COALESCE(SUM(ot.total),0) AS total
+               FROM orden_trabajo ot
+               INNER JOIN orden_sucursal os ON os.orden_id = ot.id
+               LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
+               WHERE os.sucursal_id IN (?)
+               GROUP BY ot.estatus_id, estatus
+               ORDER BY count DESC`
+            : `SELECT
+                 ot.estatus_id AS estatus_id,
+                 COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
+                 COUNT(*) AS count,
+                 COALESCE(SUM(ot.total),0) AS total
+               FROM orden_trabajo ot
+               LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
+               GROUP BY ot.estatus_id, estatus
+               ORDER BY count DESC`,
+          shouldRestrictOrders ? [allowedSucursalIds] : [],
+        )
+      : [[]];
 
-    const [recentOrders] = await pool.query(`
-      SELECT
-        ot.id,
-        ot.fecha_ingreso,
-        c.nombre AS cliente,
-        COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
-        COALESCE(ot.total,0) AS total,
-        IFNULL(ot.facturado,0) AS facturado
-      FROM orden_trabajo ot
-      JOIN cliente c ON c.id = ot.cliente_id
-      LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
-      ORDER BY ot.fecha_ingreso DESC, ot.id DESC
-      LIMIT 10
-    `);
+    const [recentOrders] = hasOrderAccess
+      ? await pool.query(
+          shouldRestrictOrders
+            ? `SELECT
+                 ot.id,
+                 ot.fecha_ingreso,
+                 c.nombre AS cliente,
+                 COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
+                 COALESCE(ot.total,0) AS total,
+                 IFNULL(ot.facturado,0) AS facturado
+               FROM orden_trabajo ot
+               INNER JOIN orden_sucursal os ON os.orden_id = ot.id
+               JOIN cliente c ON c.id = ot.cliente_id
+               LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
+               WHERE os.sucursal_id IN (?)
+               ORDER BY ot.fecha_ingreso DESC, ot.id DESC
+               LIMIT 10`
+            : `SELECT
+                 ot.id,
+                 ot.fecha_ingreso,
+                 c.nombre AS cliente,
+                 COALESCE(ce.nombre, CONCAT('Estatus #', ot.estatus_id)) AS estatus,
+                 COALESCE(ot.total,0) AS total,
+                 IFNULL(ot.facturado,0) AS facturado
+               FROM orden_trabajo ot
+               JOIN cliente c ON c.id = ot.cliente_id
+               LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
+               ORDER BY ot.fecha_ingreso DESC, ot.id DESC
+               LIMIT 10`,
+          shouldRestrictOrders ? [allowedSucursalIds] : [],
+        )
+      : [[]];
 
     // Meta mensual (para el mes actual)
     const { anio, mes } = currentYm();

@@ -1,13 +1,13 @@
 const express = require('express');
 const asyncHandler = require('../../utils/asyncHandler');
 const validate = require('../../middleware/validate');
-const { required } = require('../../middleware/auth');
+const { required, adminOnly } = require('../../middleware/auth');
 const v = require('./validators');
 const aux = require('./auxiliaries');
 
 const router = express.Router();
 
-router.use(required);
+router.use(required, adminOnly);
 
 router.get('/', validate(v.listQuery, 'query'), asyncHandler(async (req, res) => {
   const rows = await aux.list(req.query);

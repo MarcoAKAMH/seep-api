@@ -2,12 +2,12 @@ const express = require('express');
 const Joi = require('joi');
 
 const { pool } = require('../../config/db');
-const { required } = require('../../middleware/auth');
+const { required, adminOnly } = require('../../middleware/auth');
 const validate = require('../../middleware/validate');
 const asyncHandler = require('../../utils/asyncHandler');
 
 const router = express.Router();
-router.use(required);
+router.use(required, adminOnly);
 
 const listQuery = Joi.object({
   year: Joi.number().integer().min(2000).max(2100).optional(),

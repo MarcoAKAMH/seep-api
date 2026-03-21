@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const Joi = require('joi');
 const { pool } = require('../../config/db');
-const { required } = require('../../middleware/auth');
+const { required, adminOnly } = require('../../middleware/auth');
 const validate = require('../../middleware/validate');
 const asyncHandler = require('../../utils/asyncHandler');
 
+router.use(required, adminOnly);
+
 // GET /api/reports/summary
-router.get('/summary', required, async (req, res, next) => {
+router.get('/summary', async (req, res, next) => {
   try {
     const [ordersByStatus] = await pool.query(`
       SELECT
@@ -75,7 +77,7 @@ const ventasTotalesQuery = Joi.object({
 
 // GET /api/reports/ventas_totales?inicio=YYYY-MM-DD&fin=YYYY-MM-DD&meta=1234.56
 // Nota: devuelve SOLO días con ventas (como el Excel).
-router.get('/ventas_totales', required, validate(ventasTotalesQuery, 'query'), asyncHandler(async (req, res) => {
+router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandler(async (req, res) => {
   const inicio = String(req.query.inicio);
   const fin = String(req.query.fin);
   const meta = Number(req.query.meta || 0);
@@ -182,7 +184,7 @@ function calcPromedioCumplimiento(rows, meta, dias) {
 }
 
 // GET /api/reports/resultado_trabajadores?inicio=YYYY-MM-DD&fin=YYYY-MM-DD&meta=1000&dias=6
-router.get('/resultado_trabajadores', required, validate(trabajadoresQuery, 'query'), asyncHandler(async (req, res) => {
+router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyncHandler(async (req, res) => {
   const inicio = String(req.query.inicio);
   const fin = String(req.query.fin);
   const meta = Number(req.query.meta || 0);

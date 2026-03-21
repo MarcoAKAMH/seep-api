@@ -6,7 +6,7 @@ const validate = require('../../middleware/validate');
 const asyncHandler = require('../../utils/asyncHandler');
 const { pool } = require('../../config/db');
 const { signAccessToken } = require('../../config/jwt');
-const { required } = require('../../middleware/auth');
+const { required, loadUserAccessProfile } = require('../../middleware/auth');
 const { generateOpaqueToken, sha256Hex, getCookie, nowUtcDate, addDays } = require('../../utils/refreshTokens');
 
 const router = express.Router();
@@ -85,6 +85,7 @@ const registerSchema = Joi.object({
 });
 
 async function issueTokens({ res, user, remember, req }) {
+  const accessProfile = await loadUserAccessProfile(user.id);
   const accessToken = signAccessToken({ sub: String(user.id), correo: user.correo, nombre: user.nombre });
 
   const refreshToken = generateOpaqueToken();
@@ -107,7 +108,15 @@ async function issueTokens({ res, user, remember, req }) {
 
   setRefreshCookie(res, refreshToken, { remember });
 
-  return { accessToken };
+  return {
+    accessToken,
+    authUser: {
+      id: user.id,
+      correo: user.correo,
+      nombre: user.nombre,
+      ...accessProfile,
+    },
+  };
 }
 
 router.post(
@@ -134,11 +143,11 @@ router.post(
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ message: LOGIN_ERROR_MESSAGE });
 
-    const { accessToken } = await issueTokens({ res, user, remember, req });
+    const { accessToken, authUser } = await issueTokens({ res, user, remember, req });
 
     return res.json({
       token: accessToken,
-      user: { id: user.id, correo: user.correo, nombre: user.nombre },
+      user: authUser,
     });
   })
 );
@@ -233,11 +242,12 @@ router.post(
     // Keep the original session expiry (no infinite extension) but rotate token value.
     setRefreshCookie(res, newRefreshToken, record.is_persistent ? { maxAgeMs: remainingMs } : { remember: false });
 
+    const accessProfile = await loadUserAccessProfile(user.id);
     const accessToken = signAccessToken({ sub: String(user.id), correo: user.correo, nombre: user.nombre });
 
     return res.json({
       token: accessToken,
-      user: { id: user.id, correo: user.correo, nombre: user.nombre },
+      user: { id: user.id, correo: user.correo, nombre: user.nombre, ...accessProfile },
     });
   })
 );
