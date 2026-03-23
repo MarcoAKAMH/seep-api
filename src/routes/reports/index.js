@@ -88,7 +88,7 @@ router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandle
         COALESCE(ccv.nombre, 'SIN CATEGORIA') AS tipo,
         SUM(COALESCE(ot.valor_mano_obra,0)) AS mano_obra,
         SUM(COALESCE(ot.valor_repuestos,0)) AS repuestos,
-        SUM(COALESCE(ot.valor_reparacion,0)) AS total_reparacion
+        SUM(COALESCE(ot.total,0)) AS total_reparacion
       FROM orden_trabajo ot
       LEFT JOIN vehiculo v ON v.id = ot.vehiculo_id
       LEFT JOIN cat_categoria_vehiculo ccv ON ccv.id = v.categoria_id
@@ -195,14 +195,14 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
     `SELECT
       DATE(ot.entrega_at) AS fecha,
       ot.id AS orden_id,
-      COALESCE(ot.valor_reparacion,0) AS total_venta,
+      COALESCE(ot.total,0) AS total_venta,
       oa.empleado_id AS empleado_id
     FROM orden_trabajo ot
     JOIN orden_asignacion oa ON oa.orden_id = ot.id
     WHERE ot.entrega_at IS NOT NULL
       AND DATE(ot.entrega_at) >= :inicio
       AND DATE(ot.entrega_at) <= :fin
-      AND COALESCE(ot.valor_reparacion,0) > 0`,
+      AND COALESCE(ot.total,0) > 0`,
     { inicio, fin }
   );
 
