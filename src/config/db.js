@@ -1,10 +1,17 @@
+const fs = require('fs');
 const mysql = require('mysql2/promise');
 
 function sslOptionsFromEnv() {
   if (String(process.env.DB_SSL || '').toLowerCase() !== 'true') return undefined;
-  // For local dev with self-signed certs, rejectUnauthorized=false is common.
   const rejectUnauthorized = String(process.env.DB_SSL_REJECT_UNAUTHORIZED || '').toLowerCase() !== 'false';
-  return { rejectUnauthorized };
+  const ssl = { rejectUnauthorized };
+
+  const caPath = process.env.DB_SSL_CA_PATH;
+  if (caPath) {
+    ssl.ca = fs.readFileSync(caPath, 'utf8');
+  }
+
+  return ssl;
 }
 
 const pool = mysql.createPool({

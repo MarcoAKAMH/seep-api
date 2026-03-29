@@ -36,6 +36,14 @@
   DB_SSL=false
   ```
 
+  Si tu MySQL administrado en Lightsail requiere validar la CA de AWS, descarga el bundle oficial y define:
+
+  ```env
+  DB_SSL=true
+  DB_SSL_REJECT_UNAUTHORIZED=true
+  DB_SSL_CA_PATH=/home/ubuntu/certs/global-bundle.pem
+  ```
+
   ---
 
   ## 3) Instalar y ejecutar
@@ -213,3 +221,23 @@ mysql -h 127.0.0.1 -P 3306 -u root -p seep_taller < sql/2026_03_auth_refresh_tok
 
 > En producción usa HTTPS y define `CORS_ORIGIN` con tu URL exacta de frontend, por ejemplo:
 > `CORS_ORIGIN=https://panel.seep.com.mx`
+
+### SSL con Lightsail Managed Database
+
+AWS indica que los certificados etiquetados para Amazon RDS también funcionan para bases administradas en Lightsail. Si tu app falla con errores como `self-signed certificate in certificate chain`, descarga el bundle oficial y úsalo en `DB_SSL_CA_PATH`.
+
+Ejemplo en Linux:
+
+```bash
+sudo mkdir -p /home/ubuntu/certs
+curl -fsSL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o /home/ubuntu/certs/global-bundle.pem
+chmod 644 /home/ubuntu/certs/global-bundle.pem
+```
+
+Luego en `.env`:
+
+```env
+DB_SSL=true
+DB_SSL_REJECT_UNAUTHORIZED=true
+DB_SSL_CA_PATH=/home/ubuntu/certs/global-bundle.pem
+```
