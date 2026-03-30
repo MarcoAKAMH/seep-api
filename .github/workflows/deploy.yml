@@ -39,9 +39,15 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p "${{ secrets.LIGHTSAIL_PORT }}" "${{ secrets.LIGHTSAIL_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Ensure remote directory exists
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.LIGHTSAIL_PORT }}" \
+            ${{ secrets.LIGHTSAIL_USER }}@${{ secrets.LIGHTSAIL_HOST }} \
+            "mkdir -p /home/ubuntu/seep-api"
+
       - name: Sync API code without .env
         run: |
-          rsync -az --delete \
+          rsync -az \
             --exclude ".git" \
             --exclude "node_modules" \
             --exclude ".env" \
