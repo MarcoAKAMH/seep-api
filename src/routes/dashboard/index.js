@@ -3,9 +3,9 @@ const router = express.Router();
 const { pool } = require('../../config/db');
 const { required } = require('../../middleware/auth');
 
-function currentYm() {
+function currentDateParts() {
   const d = new Date();
-  return { anio: d.getFullYear(), mes: d.getMonth() + 1 };
+  return { anio: d.getFullYear(), mes: d.getMonth() + 1, dia: d.getDate() };
 }
 
 function countNonSundayDaysInMonth(anio, mes) {
@@ -17,6 +17,19 @@ function countNonSundayDaysInMonth(anio, mes) {
     if (dt.getDay() !== 0) count += 1; // 0 = Sunday
   }
   return count;
+}
+
+async function countNonSundayHolidaysInMonth(anio, mes) {
+  const [[row]] = await pool.query(
+    `SELECT COUNT(DISTINCT fecha) AS total
+       FROM dia_festivo
+      WHERE YEAR(fecha) = :anio
+        AND MONTH(fecha) = :mes
+        AND DAYOFWEEK(fecha) <> 1`,
+    { anio, mes }
+  );
+
+  return Number(row?.total ?? 0);
 }
 
 function getAllowedSucursalIds(user) {
@@ -62,6 +75,52 @@ router.get('/summary', required, async (req, res, next) => {
           shouldRestrictOrders ? [allowedSucursalIds] : [],
         )
       : [[{ facturado: 0, porFacturar: 0 }]];
+
+    const { anio, mes, dia } = currentDateParts();
+
+    const [[deliveredMonthRow]] = hasOrderAccess
+      ? await pool.query(
+          shouldRestrictOrders
+            ? `SELECT COALESCE(SUM(ot.total), 0) AS acumulado
+                 FROM orden_trabajo ot
+                 INNER JOIN orden_sucursal os ON os.orden_id = ot.id
+                WHERE os.sucursal_id IN (?)
+                  AND ot.entrega_at IS NOT NULL
+                  AND YEAR(ot.entrega_at) = ?
+                  AND MONTH(ot.entrega_at) = ?`
+            : `SELECT COALESCE(SUM(total), 0) AS acumulado
+                 FROM orden_trabajo
+                WHERE entrega_at IS NOT NULL
+                  AND YEAR(entrega_at) = ?
+                  AND MONTH(entrega_at) = ?`,
+          shouldRestrictOrders
+            ? [allowedSucursalIds, anio, mes]
+            : [anio, mes],
+        )
+      : [[{ acumulado: 0 }]];
+
+    const [[deliveredDayRow]] = hasOrderAccess
+      ? await pool.query(
+          shouldRestrictOrders
+            ? `SELECT COALESCE(SUM(ot.total), 0) AS acumulado
+                 FROM orden_trabajo ot
+                 INNER JOIN orden_sucursal os ON os.orden_id = ot.id
+                WHERE os.sucursal_id IN (?)
+                  AND ot.entrega_at IS NOT NULL
+                  AND YEAR(ot.entrega_at) = ?
+                  AND MONTH(ot.entrega_at) = ?
+                  AND DAY(ot.entrega_at) = ?`
+            : `SELECT COALESCE(SUM(total), 0) AS acumulado
+                 FROM orden_trabajo
+                WHERE entrega_at IS NOT NULL
+                  AND YEAR(entrega_at) = ?
+                  AND MONTH(entrega_at) = ?
+                  AND DAY(entrega_at) = ?`,
+          shouldRestrictOrders
+            ? [allowedSucursalIds, anio, mes, dia]
+            : [anio, mes, dia],
+        )
+      : [[{ acumulado: 0 }]];
 
     const [ordersByStatus] = hasOrderAccess
       ? await pool.query(
@@ -124,15 +183,22 @@ router.get('/summary', required, async (req, res, next) => {
       : [[]];
 
     // Meta mensual (para el mes actual)
-    const { anio, mes } = currentYm();
     const [[metaRow]] = await pool.query(
       'SELECT id, anio, mes, meta_pesos FROM meta_mensual WHERE anio = :anio AND mes = :mes LIMIT 1',
       { anio, mes }
     );
 
     const meta_pesos = Number(metaRow?.meta_pesos || 0);
-    const dias_laborables = countNonSundayDaysInMonth(anio, mes);
+    const diasBase = countNonSundayDaysInMonth(anio, mes);
+    const diasFestivos = await countNonSundayHolidaysInMonth(anio, mes);
+    const dias_laborables = Math.max(0, diasBase - diasFestivos);
     const meta_dia_pesos = dias_laborables > 0 ? (meta_pesos / dias_laborables) : 0;
+    const acumulado_entregadas_pesos = Number(deliveredMonthRow?.acumulado || 0);
+    const cumplimiento_meta_pct = meta_pesos > 0 ? (acumulado_entregadas_pesos / meta_pesos) : 0;
+    const restante_meta_pesos = Math.max(0, meta_pesos - acumulado_entregadas_pesos);
+    const acumulado_entregadas_hoy_pesos = Number(deliveredDayRow?.acumulado || 0);
+    const cumplimiento_meta_dia_pct = meta_dia_pesos > 0 ? (acumulado_entregadas_hoy_pesos / meta_dia_pesos) : 0;
+    const restante_meta_dia_pesos = Math.max(0, meta_dia_pesos - acumulado_entregadas_hoy_pesos);
 
     res.json({
       counts: {
@@ -163,6 +229,12 @@ router.get('/summary', required, async (req, res, next) => {
         meta_pesos,
         dias_laborables,
         meta_dia_pesos,
+        acumulado_entregadas_pesos,
+        cumplimiento_meta_pct,
+        restante_meta_pesos,
+        acumulado_entregadas_hoy_pesos,
+        cumplimiento_meta_dia_pct,
+        restante_meta_dia_pesos,
       }
     });
   } catch (err) {
