@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { pool } = require('../../config/db');
+const { ROLE_IDS } = require('../../config/roles');
 const { buildUpdateSet, buildInsert } = require('../../utils/sql');
 
 const TABLE = 'usuario';
@@ -9,14 +10,8 @@ const PK = ["id"];
 const SELECT_FIELDS = ["id", "correo", "nombre", "activo", "created_at", "updated_at"];
 const INSERT_FIELDS = ["correo", "nombre", "activo"];
 const UPDATE_FIELDS = ["correo", "nombre", "activo"];
-const ADMIN_ROLE_NAME = 'admin';
-
 function columnList(fields) {
   return fields.map(f => `\`${f}\``).join(', ');
-}
-
-function normalizeRoleName(value) {
-  return String(value || '').trim().toLowerCase();
 }
 
 async function hydrateRoles(rows, connection = pool) {
@@ -65,7 +60,7 @@ async function normalizeRoleIds(connection, roleIds) {
     throw Object.assign(new Error('Uno o más roles seleccionados no existen.'), { status: 400 });
   }
 
-  const hasAdmin = rows.some((row) => normalizeRoleName(row.nombre) === ADMIN_ROLE_NAME);
+  const hasAdmin = rows.some((row) => Number(row.id) === ROLE_IDS.ADMINISTRADOR);
   if (hasAdmin && rows.length > 1) {
     throw Object.assign(new Error('El rol Admin no se puede combinar con otros roles.'), { status: 400 });
   }

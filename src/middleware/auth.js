@@ -1,11 +1,6 @@
 const { pool } = require('../config/db');
 const { verifyToken } = require('../config/jwt');
-
-const ADMIN_ROLE_NAME = 'admin';
-
-function normalizeRoleName(value) {
-  return String(value || '').trim().toLowerCase();
-}
+const { ROLE_IDS } = require('../config/roles');
 
 async function loadUserAccessProfile(userId) {
   const [roleRows] = await pool.query(
@@ -31,8 +26,7 @@ async function loadUserAccessProfile(userId) {
     nombre: row.nombre,
   }));
 
-  const normalizedRoleNames = roles.map((role) => normalizeRoleName(role.nombre));
-  const isAdmin = normalizedRoleNames.includes(ADMIN_ROLE_NAME);
+  const isAdmin = roles.some((role) => Number(role.id) === ROLE_IDS.ADMINISTRADOR);
   let allowedSucursalIds = [];
 
   if (isAdmin) {
@@ -80,4 +74,4 @@ function adminOnly(req, res, next) {
   return next();
 }
 
-module.exports = { required, adminOnly, loadUserAccessProfile, normalizeRoleName };
+module.exports = { required, adminOnly, loadUserAccessProfile };
