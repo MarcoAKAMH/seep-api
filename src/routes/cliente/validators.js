@@ -27,7 +27,7 @@ const create = Joi.object({
   nombre_encargado: Joi.string().max(180).required(),
   telefono: Joi.string().max(30).required(),
   correo: Joi.string().email().max(150).allow(null, '').optional(),
-  vehiculos: Joi.array().items(vehiculoItem).min(1).required(),
+  vehiculos: Joi.array().items(vehiculoItem).required(),
 });
 
 const update = Joi.object({
@@ -36,7 +36,7 @@ const update = Joi.object({
   nombre_encargado: Joi.string().max(180).optional(),
   telefono: Joi.string().max(30).optional(),
   correo: Joi.string().email().max(150).allow(null, '').optional(),
-  vehiculos: Joi.array().items(vehiculoItem).min(1).optional(),
+  vehiculos: Joi.array().items(vehiculoItem).optional(),
 }).min(1);
 
 module.exports = { listQuery, create, update, idParam };

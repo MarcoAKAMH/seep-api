@@ -105,7 +105,7 @@ router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandle
     const tipo = String(r.tipo);
     if (!byTipo.has(tipo)) byTipo.set(tipo, []);
     byTipo.get(tipo).push({
-      fecha: String(r.fecha).slice(0, 10),
+      fecha: normalizeDateKey(r.fecha),
       mano_obra: Number(r.mano_obra || 0),
       repuestos: Number(r.repuestos || 0),
       total_reparacion: Number(r.total_reparacion || 0),
@@ -153,6 +153,15 @@ const trabajadoresQuery = Joi.object({
 
 function ymd(dt) {
   return dt.toISOString().slice(0, 10);
+}
+
+function normalizeDateKey(value) {
+  if (!value) return '';
+  if (value instanceof Date) return ymd(value);
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? text.slice(0, 10) : ymd(parsed);
 }
 
 function enumerateDates(inicio, fin) {
@@ -213,7 +222,7 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
   const orders = new Map();
   for (const r of rows) {
     const orden_id = Number(r.orden_id);
-    const fecha = String(r.fecha).slice(0, 10);
+    const fecha = normalizeDateKey(r.fecha);
     const amountByBase = {
       total: Number(r.total_venta || 0),
       mano_obra: Number(r.valor_mano_obra || 0),
