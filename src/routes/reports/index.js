@@ -148,6 +148,7 @@ const trabajadoresQuery = Joi.object({
   fin: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   meta: Joi.number().min(0).precision(2).default(0),
   dias: Joi.number().integer().min(1).max(31).default(6),
+  base: Joi.string().valid('total', 'mano_obra', 'repuestos').default('total'),
 });
 
 function ymd(dt) {
@@ -189,20 +190,22 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
   const fin = String(req.query.fin);
   const meta = Number(req.query.meta || 0);
   const dias = Number(req.query.dias || 6);
+  const base = String(req.query.base || 'total');
 
   // Traemos por asignación (1 fila = 1 participación del empleado en la orden)
   const [rows] = await pool.query(
     `SELECT
       DATE(ot.entrega_at) AS fecha,
       ot.id AS orden_id,
+      COALESCE(ot.valor_mano_obra,0) AS valor_mano_obra,
+      COALESCE(ot.valor_repuestos,0) AS valor_repuestos,
       COALESCE(ot.total,0) AS total_venta,
       oa.empleado_id AS empleado_id
     FROM orden_trabajo ot
     JOIN orden_asignacion oa ON oa.orden_id = ot.id
     WHERE ot.entrega_at IS NOT NULL
       AND DATE(ot.entrega_at) >= :inicio
-      AND DATE(ot.entrega_at) <= :fin
-      AND COALESCE(ot.total,0) > 0`,
+      AND DATE(ot.entrega_at) <= :fin`,
     { inicio, fin }
   );
 
@@ -211,8 +214,14 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
   for (const r of rows) {
     const orden_id = Number(r.orden_id);
     const fecha = String(r.fecha).slice(0, 10);
-    const total_venta = Number(r.total_venta || 0);
+    const amountByBase = {
+      total: Number(r.total_venta || 0),
+      mano_obra: Number(r.valor_mano_obra || 0),
+      repuestos: Number(r.valor_repuestos || 0),
+    };
+    const total_venta = amountByBase[base] ?? amountByBase.total;
     const empleado_id = Number(r.empleado_id);
+    if (total_venta <= 0) continue;
     if (!orders.has(orden_id)) {
       orders.set(orden_id, { fecha, total_venta, counts: new Map(), totalCount: 0 });
     }
@@ -238,7 +247,7 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
 
   const empleadoIds = Array.from(agg.keys());
   if (empleadoIds.length === 0) {
-    return res.json({ params: { inicio, fin, meta, dias }, trabajadores: [] });
+    return res.json({ params: { inicio, fin, meta, dias, base }, trabajadores: [] });
   }
 
   const [emps] = await pool.query(
@@ -285,7 +294,7 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
     })
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-  res.json({ params: { inicio, fin, meta, dias }, trabajadores });
+  res.json({ params: { inicio, fin, meta, dias, base }, trabajadores });
 }));
 
 module.exports = router;
