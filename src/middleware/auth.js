@@ -69,7 +69,7 @@ async function required(req, res, next) {
     req.user = { ...payload, ...accessProfile };
     return next();
   } catch (err) {
-    return res.status(401).json({ message: 'El token es invalido o ya expiro.' });
+    return res.status(401).json({ message: 'El token es inválido o ya expiró.' });
   }
 }
 

@@ -11,21 +11,21 @@ function translateValidationDetail(detail) {
     case 'any.required':
       return `El campo ${label} es obligatorio.`;
     case 'string.empty':
-      return `El campo ${label} no puede ir vacio.`;
+      return `El campo ${label} no puede ir vacío.`;
     case 'string.base':
       return `El campo ${label} debe ser texto.`;
     case 'string.email':
-      return `El campo ${label} debe ser un correo electronico valido.`;
+      return `El campo ${label} debe ser un correo electrónico válido.`;
     case 'string.max':
-      return `El campo ${label} no puede tener mas de ${detail.context.limit} caracteres.`;
+      return `El campo ${label} no puede tener más de ${detail.context.limit} caracteres.`;
     case 'string.min':
       return `El campo ${label} debe tener al menos ${detail.context.limit} caracteres.`;
     case 'string.pattern.base':
-      return `El campo ${label} tiene un formato invalido.`;
+      return `El campo ${label} tiene un formato inválido.`;
     case 'number.base':
-      return `El campo ${label} debe ser un numero.`;
+      return `El campo ${label} debe ser un número.`;
     case 'number.integer':
-      return `El campo ${label} debe ser un numero entero.`;
+      return `El campo ${label} debe ser un número entero.`;
     case 'number.min':
       return `El campo ${label} debe ser mayor o igual a ${detail.context.limit}.`;
     case 'number.max':
@@ -33,11 +33,11 @@ function translateValidationDetail(detail) {
     case 'date.base':
     case 'date.format':
     case 'date.iso':
-      return `El campo ${label} debe tener una fecha valida en formato ISO.`;
+      return `El campo ${label} debe tener una fecha válida en formato ISO.`;
     case 'boolean.base':
       return `El campo ${label} debe ser verdadero o falso.`;
     case 'object.min':
-      return `Debes enviar al menos ${detail.context.limit} campo para actualizar.`;
+      return `Debes enviar al menos ${detail.context.limit} ${detail.context.limit === 1 ? 'campo' : 'campos'} para actualizar.`;
     default:
       return detail.message;
   }
@@ -52,7 +52,7 @@ module.exports = function validate(schema, property = 'body') {
     });
     if (error) {
       return res.status(400).json({
-        message: 'Error de validacion.',
+        message: 'Error de validación.',
         details: error.details.map(d => ({ message: translateValidationDetail(d), path: d.path })),
       });
     }

@@ -75,7 +75,7 @@ async function updateVehiculo(db, clienteId, vehiculo) {
   const sql = `UPDATE \`${VEHICULO_TABLE}\` SET ${upd.set} WHERE id = :id AND cliente_id = :cliente_id`;
   const [result] = await db.query(sql, { ...upd.values, id: vehiculo.id, cliente_id: clienteId });
   if (result.affectedRows === 0) {
-    throw Object.assign(new Error('No se encontro el vehiculo solicitado para este cliente.'), { status: 400 });
+    throw Object.assign(new Error('No se encontró el vehículo solicitado para este cliente.'), { status: 400 });
   }
 }
 
@@ -88,7 +88,7 @@ async function syncVehiculos(db, clienteId, vehiculos) {
     if (vehiculo.id) {
       retainedIds.add(Number(vehiculo.id));
       if (!existingIds.has(Number(vehiculo.id))) {
-        throw Object.assign(new Error('No se encontro el vehiculo solicitado para este cliente.'), { status: 400 });
+        throw Object.assign(new Error('No se encontró el vehículo solicitado para este cliente.'), { status: 400 });
       }
       await updateVehiculo(db, clienteId, vehiculo);
     } else {

@@ -16,7 +16,7 @@ router.get('/', validate(v.listQuery, 'query'), asyncHandler(async (req, res) =>
 
 router.get('/:usuario_id/:rol_id', validate(v.keyParams, 'params'), asyncHandler(async (req, res) => {
   const row = await aux.getByKey({ usuario_id: Number(req.params.usuario_id), rol_id: Number(req.params.rol_id) });
-  if (!row) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
+  if (!row) return res.status(404).json({ message: 'No se encontró el recurso solicitado.' });
   res.json(row);
 }));
 
@@ -34,7 +34,7 @@ router.put('/:usuario_id/:rol_id', validate(v.keyParams, 'params'), validate(v.u
 router.delete('/:usuario_id/:rol_id', validate(v.keyParams, 'params'), asyncHandler(async (req, res) => {
   const keys = { usuario_id: Number(req.params.usuario_id), rol_id: Number(req.params.rol_id) };
   const ok = await aux.removeOne(keys);
-  if (!ok) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
+  if (!ok) return res.status(404).json({ message: 'No se encontró el recurso solicitado.' });
   res.status(204).send();
 }));
 

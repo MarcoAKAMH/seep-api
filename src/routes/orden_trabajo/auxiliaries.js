@@ -73,15 +73,15 @@ async function normalizeOrdenData(connection, data, currentOrder = null) {
   if (vehiculoId) {
     const vehiculo = await getVehiculoWithCategoria(connection, vehiculoId);
     if (!vehiculo) {
-      throw Object.assign(new Error('El vehiculo seleccionado no existe.'), { status: 400 });
+      throw Object.assign(new Error('El vehículo seleccionado no existe.'), { status: 400 });
     }
 
     if (clienteId && Number(vehiculo.cliente_id) !== Number(clienteId)) {
-      throw Object.assign(new Error('El vehiculo seleccionado no pertenece al cliente indicado.'), { status: 400 });
+      throw Object.assign(new Error('El vehículo seleccionado no pertenece al cliente indicado.'), { status: 400 });
     }
 
     if (!vehiculo.categoria_nombre) {
-      throw Object.assign(new Error('El vehiculo seleccionado no tiene una categoria valida.'), { status: 400 });
+      throw Object.assign(new Error('El vehículo seleccionado no tiene una categoría válida.'), { status: 400 });
     }
 
     normalized.tipo_reparacion_id = vehiculo.categoria_id;
@@ -94,7 +94,7 @@ async function normalizeOrdenData(connection, data, currentOrder = null) {
       : (currentOrder?.tipo_reparacion_id ?? null);
 
   if (!tipoReparacionId) {
-    throw Object.assign(new Error('Selecciona un vehiculo o el tipo de reparacion Material suelto.'), { status: 400 });
+    throw Object.assign(new Error('Selecciona un vehículo o el tipo de reparación "Material suelto".'), { status: 400 });
   }
 
   const [rows] = await connection.query(
@@ -106,11 +106,11 @@ async function normalizeOrdenData(connection, data, currentOrder = null) {
   );
 
   if (rows.length === 0) {
-    throw Object.assign(new Error('El tipo de reparacion seleccionado no existe.'), { status: 400 });
+    throw Object.assign(new Error('El tipo de reparación seleccionado no existe.'), { status: 400 });
   }
 
   if (String(rows[0].nombre || '').trim().toLowerCase() !== 'material suelto') {
-    throw Object.assign(new Error('Solo se puede omitir el vehiculo cuando la orden es de tipo Material suelto.'), { status: 400 });
+    throw Object.assign(new Error('Solo se puede omitir el vehículo cuando la orden es de tipo "Material suelto".'), { status: 400 });
   }
 
   return normalized;

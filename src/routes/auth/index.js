@@ -10,7 +10,7 @@ const { required, loadUserAccessProfile } = require('../../middleware/auth');
 const { generateOpaqueToken, sha256Hex, getCookie, nowUtcDate, addDays } = require('../../utils/refreshTokens');
 
 const router = express.Router();
-const LOGIN_ERROR_MESSAGE = 'Error de validacion. Verifica tus credenciales.';
+const LOGIN_ERROR_MESSAGE = 'Error de validación. Verifica tus credenciales.';
 
 // ---- Config ----
 const REFRESH_COOKIE_NAME = process.env.REFRESH_COOKIE_NAME || 'seep_rt';
@@ -157,7 +157,7 @@ router.post(
   rateLimit({ keyPrefix: 'refresh', windowMs: 5 * 60 * 1000, max: 60 }),
   asyncHandler(async (req, res) => {
     const rt = getCookie(req, REFRESH_COOKIE_NAME);
-    if (!rt) return res.status(401).json({ message: 'No se envio el refresh token.' });
+    if (!rt) return res.status(401).json({ message: 'No se envió el refresh token.' });
 
     const hash = sha256Hex(rt);
 
@@ -174,7 +174,7 @@ router.post(
     // Token not found -> maybe cleared cookie or invalid.
     if (!record) {
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'El refresh token es invalido.' });
+      return res.status(401).json({ message: 'El refresh token es inválido.' });
     }
 
     // If revoked and still presented => possible token reuse / stolen token.
@@ -194,7 +194,7 @@ router.post(
     if (record.expires_at && new Date(record.expires_at).getTime() <= Date.now()) {
       await pool.query('UPDATE auth_refresh_token SET revoked_at = NOW() WHERE id = :id', { id: record.id });
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'El refresh token ya expiro.' });
+      return res.status(401).json({ message: 'El refresh token ya expiró.' });
     }
 
     // Rotate refresh token
@@ -223,7 +223,7 @@ router.post(
 
     if (remainingMs <= 0) {
       clearRefreshCookie(res);
-      return res.status(401).json({ message: 'El refresh token ya expiro.' });
+      return res.status(401).json({ message: 'El refresh token ya expiró.' });
     }
 
     await pool.query(

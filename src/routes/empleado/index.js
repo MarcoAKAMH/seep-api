@@ -16,7 +16,7 @@ router.get('/', validate(v.listQuery, 'query'), asyncHandler(async (req, res) =>
 
 router.get('/:id', validate(v.idParam, 'params'), asyncHandler(async (req, res) => {
   const row = await aux.getById(Number(req.params.id));
-  if (!row) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
+  if (!row) return res.status(404).json({ message: 'No se encontró el recurso solicitado.' });
   res.json(row);
 }));
 
@@ -29,13 +29,13 @@ router.post('/', validate(v.create), asyncHandler(async (req, res) => {
 
 router.put('/:id', validate(v.idParam, 'params'), validate(v.update), asyncHandler(async (req, res) => {
   const updated = await aux.updateOne(Number(req.params.id), req.body);
-  if (!updated) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
+  if (!updated) return res.status(404).json({ message: 'No se encontró el recurso solicitado.' });
   res.json(updated);
 }));
 
 router.delete('/:id', validate(v.idParam, 'params'), asyncHandler(async (req, res) => {
   const ok = await aux.removeOne(Number(req.params.id));
-  if (!ok) return res.status(404).json({ message: 'No se encontro el recurso solicitado.' });
+  if (!ok) return res.status(404).json({ message: 'No se encontró el recurso solicitado.' });
   res.status(204).send();
 }));
 
