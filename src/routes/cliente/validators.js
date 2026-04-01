@@ -24,7 +24,7 @@ const vehiculoItem = Joi.object({
 const create = Joi.object({
   tipo_cliente_id: Joi.number().integer().min(1).max(MAX_ID).required(),
   nombre: Joi.string().max(180).required(),
-  nombre_encargado: Joi.string().max(180).required(),
+  nombre_encargado: Joi.string().max(180).allow(null, '').optional(),
   telefono: Joi.string().max(30).required(),
   correo: Joi.string().email().max(150).allow(null, '').optional(),
   vehiculos: Joi.array().items(vehiculoItem).required(),
@@ -33,7 +33,7 @@ const create = Joi.object({
 const update = Joi.object({
   tipo_cliente_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
   nombre: Joi.string().max(180).optional(),
-  nombre_encargado: Joi.string().max(180).optional(),
+  nombre_encargado: Joi.string().max(180).allow(null, '').optional(),
   telefono: Joi.string().max(30).optional(),
   correo: Joi.string().email().max(150).allow(null, '').optional(),
   vehiculos: Joi.array().items(vehiculoItem).optional(),
