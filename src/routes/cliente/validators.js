@@ -17,7 +17,7 @@ const vehiculoItem = Joi.object({
   modelo_marca: Joi.string().max(100).required(),
   placas: Joi.string().max(30).required(),
   unidad_vin: Joi.string().max(60).required(),
-  anio: Joi.number().integer().min(1900).max(2100).required(),
+  anio: Joi.number().integer().min(1900).max(2100).allow(null).optional(),
   categoria_id: Joi.number().integer().min(1).max(MAX_ID).required(),
 });
 
