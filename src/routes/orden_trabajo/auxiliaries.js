@@ -5,7 +5,6 @@ const TABLE = 'orden_trabajo';
 const ASIGNACION_TABLE = 'orden_asignacion';
 const ORDEN_SUCURSAL_TABLE = 'orden_sucursal';
 const GARANTIA_TABLE = 'garantia';
-const ENCUESTA_TABLE = 'encuesta_satisfaccion';
 const VEHICULO_TABLE = 'vehiculo';
 const CATEGORIA_TABLE = 'cat_categoria_vehiculo';
 const SUCURSAL_TABLE = 'cat_sucursal';
@@ -342,10 +341,6 @@ async function removeOne(id, user) {
     );
     await connection.query(
       `DELETE FROM \`${GARANTIA_TABLE}\` WHERE \`orden_id\` = :orden_id`,
-      { orden_id: id },
-    );
-    await connection.query(
-      `DELETE FROM \`${ENCUESTA_TABLE}\` WHERE \`orden_id\` = :orden_id`,
       { orden_id: id },
     );
 

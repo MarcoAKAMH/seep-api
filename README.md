@@ -108,7 +108,6 @@
 | `orden_trabajo` | `/api/orden_trabajo` | id | folio, cliente_id, estatus_id, fecha_ingreso |
 | `orden_sucursal` | `/api/orden_sucursal` | id | orden_id, sucursal_id |
 | `orden_asignacion` | `/api/orden_asignacion` | id | orden_id, empleado_id, rol_en_orden |
-| `encuesta_satisfaccion` | `/api/encuesta_satisfaccion` | id | orden_id |
 | `garantia` | `/api/garantia` | id | orden_id |
 | `usuario` | `/api/usuario` | id | correo, nombre, password |
 | `rol` | `/api/rol` | id | nombre |
