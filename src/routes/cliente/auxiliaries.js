@@ -114,8 +114,9 @@ async function createOne(data) {
     const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
     const [result] = await db.query(sql, insert.values);
     await syncVehiculos(db, result.insertId, data.vehiculos || []);
+    const created = await getById(result.insertId, db);
     await db.commit();
-    return getById(result.insertId);
+    return created;
   } catch (err) {
     await db.rollback();
     throw err;
@@ -152,8 +153,9 @@ async function updateOne(id, data) {
     if (data.vehiculos !== undefined) {
       await syncVehiculos(db, id, data.vehiculos);
     }
+    const updated = await getById(id, db);
     await db.commit();
-    return getById(id);
+    return updated;
   } catch (err) {
     await db.rollback();
     throw err;

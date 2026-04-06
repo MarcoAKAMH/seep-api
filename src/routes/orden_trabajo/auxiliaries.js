@@ -7,11 +7,12 @@ const ORDEN_SUCURSAL_TABLE = 'orden_sucursal';
 const GARANTIA_TABLE = 'garantia';
 const VEHICULO_TABLE = 'vehiculo';
 const CATEGORIA_TABLE = 'cat_categoria_vehiculo';
+const MATERIAL_SUELTO_TABLE = 'cat_tipo_material_suelto';
 const SUCURSAL_TABLE = 'cat_sucursal';
 const PK = ["id"];
-const SELECT_FIELDS = ["id", "cliente_id", "vehiculo_id", "kilometraje", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "valor_mano_obra", "valor_repuestos", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "total", "created_at", "updated_at"];
-const INSERT_FIELDS = ["cliente_id", "vehiculo_id", "kilometraje", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "valor_mano_obra", "valor_repuestos", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "total"];
-const UPDATE_FIELDS = ["cliente_id", "vehiculo_id", "kilometraje", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "valor_mano_obra", "valor_repuestos", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "total"];
+const SELECT_FIELDS = ["id", "cliente_id", "vehiculo_id", "kilometraje", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "valor_mano_obra", "valor_repuestos", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "tipo_material_suelto", "total", "created_at", "updated_at"];
+const INSERT_FIELDS = ["cliente_id", "vehiculo_id", "kilometraje", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "valor_mano_obra", "valor_repuestos", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "tipo_material_suelto", "total"];
+const UPDATE_FIELDS = ["cliente_id", "vehiculo_id", "kilometraje", "estatus_id", "fecha_ingreso", "fecha_entrega_estimada", "servicio", "inicio_reparacion_at", "entrega_at", "valor_mano_obra", "valor_repuestos", "facturado", "horas_reparacion", "dias_reparacion", "tipo_reparacion_id", "tipo_material_suelto", "total"];
 
 function columnList(fields, tableAlias = null) {
   if (!tableAlias) return fields.map(f => `\`${f}\``).join(', ');
@@ -26,6 +27,17 @@ function getAllowedSucursalIds(user) {
 
 function canViewAllOrders(user) {
   return Boolean(user?.is_admin || user?.can_view_all_orders);
+}
+
+function normalizeText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeComparableText(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 function assertSucursalAccess(user, sucursalId) {
@@ -84,6 +96,7 @@ async function normalizeOrdenData(connection, data, currentOrder = null) {
     }
 
     normalized.tipo_reparacion_id = vehiculo.categoria_id;
+    normalized.tipo_material_suelto = null;
     return normalized;
   }
 
@@ -113,6 +126,32 @@ async function normalizeOrdenData(connection, data, currentOrder = null) {
   if (String(rows[0].nombre || '').trim().toLowerCase() !== 'material suelto') {
     throw Object.assign(new Error('Solo se puede omitir el vehículo cuando la orden es de tipo "Material suelto".'), { status: 400 });
   }
+
+  const materialSueltoValue =
+    Object.prototype.hasOwnProperty.call(normalized, 'tipo_material_suelto')
+      ? normalized.tipo_material_suelto
+      : (currentOrder?.tipo_material_suelto ?? null);
+
+  const materialSueltoNormalizado = normalizeText(materialSueltoValue);
+  if (!materialSueltoNormalizado) {
+    throw Object.assign(new Error('Selecciona el tipo de material suelto.'), { status: 400 });
+  }
+
+  if (normalizeComparableText(materialSueltoNormalizado) === 'otro') {
+    throw Object.assign(new Error('Especifica el material suelto cuando selecciones "Otro".'), { status: 400 });
+  }
+
+  const [materialesRows] = await connection.query(
+    `SELECT \`nombre\`
+       FROM \`${MATERIAL_SUELTO_TABLE}\`
+      ORDER BY \`nombre\` ASC`,
+  );
+
+  const matchedMaterial = materialesRows.find(
+    (row) => normalizeComparableText(row.nombre) === normalizeComparableText(materialSueltoNormalizado),
+  );
+
+  normalized.tipo_material_suelto = matchedMaterial?.nombre ?? materialSueltoNormalizado;
 
   return normalized;
 }

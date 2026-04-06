@@ -8,6 +8,7 @@ const cat_estatus_orden = require('./cat_estatus_orden');
 const cat_categoria_vehiculo = require('./cat_categoria_vehiculo');
 const cat_sucursal = require('./cat_sucursal');
 const cat_tipo_reparacion = require('./cat_tipo_reparacion');
+const cat_tipo_material_suelto = require('./cat_tipo_material_suelto');
 const dashboard = require('./dashboard');
 const reports = require('./reports');
 const meta_mensual = require('./meta_mensual');
@@ -36,6 +37,7 @@ router.use('/cat_estatus_orden', cat_estatus_orden);
 router.use('/cat_categoria_vehiculo', cat_categoria_vehiculo);
 router.use('/cat_sucursal', cat_sucursal);
 router.use('/cat_tipo_reparacion', cat_tipo_reparacion);
+router.use('/cat_tipo_material_suelto', cat_tipo_material_suelto);
 
 // Summaries for UI (dashboard / reports)
 router.use('/dashboard', dashboard);

@@ -28,6 +28,7 @@ const create = Joi.object({
   horas_reparacion: Joi.number().precision(2).allow(null).optional(),
   dias_reparacion: Joi.number().precision(2).allow(null).optional(),
   tipo_reparacion_id: Joi.number().integer().min(1).max(MAX_ID).allow(null).optional(),
+  tipo_material_suelto: Joi.string().max(120).allow(null, '').optional(),
   total: Joi.number().precision(2).allow(null).optional(),
   tecnicos_reparadores_ids: Joi.array()
     .items(Joi.number().integer().min(1).max(MAX_ID))
@@ -56,6 +57,7 @@ const update = Joi.object({
   horas_reparacion: Joi.number().precision(2).allow(null).optional(),
   dias_reparacion: Joi.number().precision(2).allow(null).optional(),
   tipo_reparacion_id: Joi.number().integer().min(1).max(MAX_ID).allow(null).optional(),
+  tipo_material_suelto: Joi.string().max(120).allow(null, '').optional(),
   total: Joi.number().precision(2).allow(null).optional(),
   tecnicos_reparadores_ids: Joi.array()
     .items(Joi.number().integer().min(1).max(MAX_ID))
