@@ -5,6 +5,7 @@ const { buildUpdateSet, buildInsert } = require('../../utils/sql');
 
 const TABLE = 'usuario';
 const USUARIO_ROL_TABLE = 'usuario_rol';
+const AUTH_REFRESH_TOKEN_TABLE = 'auth_refresh_token';
 const ROL_TABLE = 'rol';
 const PK = ["id"];
 const SELECT_FIELDS = ["id", "correo", "nombre", "activo", "created_at", "updated_at"];
@@ -182,6 +183,10 @@ async function removeOne(id) {
     await connection.beginTransaction();
     await connection.query(
       `DELETE FROM \`${USUARIO_ROL_TABLE}\` WHERE \`usuario_id\` = :usuario_id`,
+      { usuario_id: id },
+    );
+    await connection.query(
+      `DELETE FROM \`${AUTH_REFRESH_TOKEN_TABLE}\` WHERE \`usuario_id\` = :usuario_id`,
       { usuario_id: id },
     );
     const [result] = await connection.query(`DELETE FROM \`${TABLE}\` WHERE id = :id`, { id });
