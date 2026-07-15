@@ -306,4 +306,77 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
   res.json({ params: { inicio, fin, meta, dias, base }, trabajadores });
 }));
 
+const detalleQuery = Joi.object({
+  empleado_id: Joi.number().integer().required(),
+  fecha: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+  base: Joi.string().valid('total', 'mano_obra', 'repuestos').default('total'),
+});
+
+// GET /api/reports/resultado_trabajadores/details?empleado_id=1&fecha=YYYY-MM-DD
+router.get('/resultado_trabajadores/details', validate(detalleQuery, 'query'), asyncHandler(async (req, res) => {
+  const empleado_id = Number(req.query.empleado_id);
+  const fecha = String(req.query.fecha);
+  const base = String(req.query.base || 'total');
+
+  const [rows] = await pool.query(
+    `SELECT
+      DATE(ot.entrega_at) AS fecha,
+      ot.id AS orden_id,
+      ot.servicio AS servicio,
+      COALESCE(ot.valor_mano_obra,0) AS valor_mano_obra,
+      COALESCE(ot.valor_repuestos,0) AS valor_repuestos,
+      COALESCE(ot.total,0) AS total_venta,
+      oa.empleado_id AS empleado_id
+    FROM orden_trabajo ot
+    JOIN orden_asignacion oa ON oa.orden_id = ot.id
+    WHERE ot.entrega_at IS NOT NULL
+      AND DATE(ot.entrega_at) = :fecha`,
+    { fecha }
+  );
+
+  // Reconstruir orders map como en el reporte principal
+  const orders = new Map();
+  for (const r of rows) {
+    const orden_id = Number(r.orden_id);
+    const fechaKey = normalizeDateKey(r.fecha);
+    const amountByBase = {
+      total: Number(r.total_venta || 0),
+      mano_obra: Number(r.valor_mano_obra || 0),
+      repuestos: Number(r.valor_repuestos || 0),
+    };
+    const total_venta = amountByBase[base] ?? amountByBase.total;
+    const emp = Number(r.empleado_id);
+    if (total_venta <= 0) continue;
+    if (!orders.has(orden_id)) {
+      orders.set(orden_id, { fecha: fechaKey, servicio: r.servicio || '', amountByBase, counts: new Map(), totalCount: 0 });
+    }
+    const o = orders.get(orden_id);
+    o.totalCount += 1;
+    o.counts.set(emp, (o.counts.get(emp) || 0) + 1);
+  }
+
+  const details = [];
+  for (const [orden_id, o] of orders.entries()) {
+    const count = o.counts.get(empleado_id) || 0;
+    if (!count) continue;
+    const share = (o.amountByBase[base] ?? o.amountByBase.total) * (count / o.totalCount);
+    details.push({
+      orden_id: Number(orden_id),
+      servicio: o.servicio,
+      fecha: o.fecha,
+      valor_mano_obra: Number(o.amountByBase.mano_obra || 0),
+      valor_repuestos: Number(o.amountByBase.repuestos || 0),
+      total: Number(o.amountByBase.total || 0),
+      participacion: Number(count),
+      total_participantes: Number(o.totalCount),
+      share: Number(share),
+    });
+  }
+
+  // Ordenar por total descendente
+  details.sort((a, b) => b.share - a.share);
+
+  res.json({ params: { empleado_id, fecha, base }, orders: details });
+}));
+
 module.exports = router;
