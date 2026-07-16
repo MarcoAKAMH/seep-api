@@ -3,9 +3,23 @@ const router = express.Router();
 const { pool } = require('../../config/db');
 const { required } = require('../../middleware/auth');
 
+const WORKSHOP_TIME_ZONE_OFFSET = '-06:00';
+const WORKSHOP_TIME_ZONE = 'America/Mexico_City';
+
+function localDeliveryDateTimeSql(column) {
+  return `CONVERT_TZ(${column}, '+00:00', '${WORKSHOP_TIME_ZONE_OFFSET}')`;
+}
+
 function currentDateParts() {
-  const d = new Date();
-  return { anio: d.getFullYear(), mes: d.getMonth() + 1, dia: d.getDate() };
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: WORKSHOP_TIME_ZONE,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return { anio: Number(values.year), mes: Number(values.month), dia: Number(values.day) };
 }
 
 function countNonSundayDaysInMonth(anio, mes) {
@@ -77,6 +91,8 @@ router.get('/summary', required, async (req, res, next) => {
       : [[{ facturado: 0, porFacturar: 0 }]];
 
     const { anio, mes, dia } = currentDateParts();
+    const entregaLocal = localDeliveryDateTimeSql('ot.entrega_at');
+    const entregaLocalSinAlias = localDeliveryDateTimeSql('entrega_at');
 
     const [[deliveredMonthRow]] = hasOrderAccess
       ? await pool.query(
@@ -86,13 +102,13 @@ router.get('/summary', required, async (req, res, next) => {
                  INNER JOIN orden_sucursal os ON os.orden_id = ot.id
                 WHERE os.sucursal_id IN (?)
                   AND ot.entrega_at IS NOT NULL
-                  AND YEAR(ot.entrega_at) = ?
-                  AND MONTH(ot.entrega_at) = ?`
+                  AND YEAR(${entregaLocal}) = ?
+                  AND MONTH(${entregaLocal}) = ?`
             : `SELECT COALESCE(SUM(total), 0) AS acumulado
                  FROM orden_trabajo
                 WHERE entrega_at IS NOT NULL
-                  AND YEAR(entrega_at) = ?
-                  AND MONTH(entrega_at) = ?`,
+                  AND YEAR(${entregaLocalSinAlias}) = ?
+                  AND MONTH(${entregaLocalSinAlias}) = ?`,
           shouldRestrictOrders
             ? [allowedSucursalIds, anio, mes]
             : [anio, mes],
@@ -107,15 +123,15 @@ router.get('/summary', required, async (req, res, next) => {
                  INNER JOIN orden_sucursal os ON os.orden_id = ot.id
                 WHERE os.sucursal_id IN (?)
                   AND ot.entrega_at IS NOT NULL
-                  AND YEAR(ot.entrega_at) = ?
-                  AND MONTH(ot.entrega_at) = ?
-                  AND DAY(ot.entrega_at) = ?`
+                  AND YEAR(${entregaLocal}) = ?
+                  AND MONTH(${entregaLocal}) = ?
+                  AND DAY(${entregaLocal}) = ?`
             : `SELECT COALESCE(SUM(total), 0) AS acumulado
                  FROM orden_trabajo
                 WHERE entrega_at IS NOT NULL
-                  AND YEAR(entrega_at) = ?
-                  AND MONTH(entrega_at) = ?
-                  AND DAY(entrega_at) = ?`,
+                  AND YEAR(${entregaLocalSinAlias}) = ?
+                  AND MONTH(${entregaLocalSinAlias}) = ?
+                  AND DAY(${entregaLocalSinAlias}) = ?`,
           shouldRestrictOrders
             ? [allowedSucursalIds, anio, mes, dia]
             : [anio, mes, dia],

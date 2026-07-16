@@ -81,10 +81,11 @@ router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandle
   const inicio = String(req.query.inicio);
   const fin = String(req.query.fin);
   const meta = Number(req.query.meta || 0);
+  const fechaEntregaLocal = localDeliveryDateSql('ot.entrega_at');
 
   const [rows] = await pool.query(
     `SELECT
-        DATE(ot.entrega_at) AS fecha,
+        ${fechaEntregaLocal} AS fecha,
         COALESCE(ccv.nombre, 'SIN CATEGORIA') AS tipo,
         SUM(COALESCE(ot.valor_mano_obra,0)) AS mano_obra,
         SUM(COALESCE(ot.valor_repuestos,0)) AS repuestos,
@@ -93,8 +94,8 @@ router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandle
       LEFT JOIN vehiculo v ON v.id = ot.vehiculo_id
       LEFT JOIN cat_categoria_vehiculo ccv ON ccv.id = v.categoria_id
       WHERE ot.entrega_at IS NOT NULL
-        AND DATE(ot.entrega_at) >= :inicio
-        AND DATE(ot.entrega_at) <= :fin
+        AND ${fechaEntregaLocal} >= :inicio
+        AND ${fechaEntregaLocal} <= :fin
       GROUP BY tipo, fecha
       ORDER BY tipo ASC, fecha ASC`,
     { inicio, fin }
@@ -151,6 +152,14 @@ const trabajadoresQuery = Joi.object({
   base: Joi.string().valid('total', 'mano_obra', 'repuestos').default('total'),
 });
 
+// `entrega_at` is received from the client as UTC. Reports must group it by the
+// workshop's local calendar day, not by its UTC date.
+const REPORT_TIME_ZONE_OFFSET = '-06:00';
+
+function localDeliveryDateSql(column) {
+  return `DATE(CONVERT_TZ(${column}, '+00:00', '${REPORT_TIME_ZONE_OFFSET}'))`;
+}
+
 function ymd(dt) {
   return dt.toISOString().slice(0, 10);
 }
@@ -200,11 +209,12 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
   const meta = Number(req.query.meta || 0);
   const dias = Number(req.query.dias || 6);
   const base = String(req.query.base || 'total');
+  const fechaEntregaLocal = localDeliveryDateSql('ot.entrega_at');
 
   // Traemos por asignación (1 fila = 1 participación del empleado en la orden)
   const [rows] = await pool.query(
     `SELECT
-      DATE(ot.entrega_at) AS fecha,
+      ${fechaEntregaLocal} AS fecha,
       ot.id AS orden_id,
       COALESCE(ot.valor_mano_obra,0) AS valor_mano_obra,
       COALESCE(ot.valor_repuestos,0) AS valor_repuestos,
@@ -213,8 +223,8 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
     FROM orden_trabajo ot
     JOIN orden_asignacion oa ON oa.orden_id = ot.id
     WHERE ot.entrega_at IS NOT NULL
-      AND DATE(ot.entrega_at) >= :inicio
-      AND DATE(ot.entrega_at) <= :fin`,
+      AND ${fechaEntregaLocal} >= :inicio
+      AND ${fechaEntregaLocal} <= :fin`,
     { inicio, fin }
   );
 
@@ -317,10 +327,11 @@ router.get('/resultado_trabajadores/details', validate(detalleQuery, 'query'), a
   const empleado_id = Number(req.query.empleado_id);
   const fecha = String(req.query.fecha);
   const base = String(req.query.base || 'total');
+  const fechaEntregaLocal = localDeliveryDateSql('ot.entrega_at');
 
   const [rows] = await pool.query(
     `SELECT
-      DATE(ot.entrega_at) AS fecha,
+      ${fechaEntregaLocal} AS fecha,
       ot.id AS orden_id,
       ot.servicio AS servicio,
       COALESCE(ot.valor_mano_obra,0) AS valor_mano_obra,
@@ -330,7 +341,7 @@ router.get('/resultado_trabajadores/details', validate(detalleQuery, 'query'), a
     FROM orden_trabajo ot
     JOIN orden_asignacion oa ON oa.orden_id = ot.id
     WHERE ot.entrega_at IS NOT NULL
-      AND DATE(ot.entrega_at) = :fecha`,
+      AND ${fechaEntregaLocal} = :fecha`,
     { fecha }
   );
 
