@@ -1,5 +1,10 @@
 const { pool } = require('../../config/db');
 const { buildUpdateSet, buildInsert } = require('../../utils/sql');
+const {
+  assertVehiclePlateIsUnique,
+  normalizeVehiclePlate,
+  rethrowDuplicateVehiclePlateError,
+} = require('../../utils/vehiclePlates');
 
 const TABLE = 'cliente';
 const SELECT_FIELDS = ["id", "tipo_cliente_id", "nombre", "nombre_encargado", "telefono", "correo", "created_at", "updated_at"];
@@ -28,7 +33,7 @@ function sanitizeVehiculoData(data) {
   return {
     marca: data.marca,
     modelo_marca: data.modelo_marca,
-    placas: data.placas,
+    placas: normalizeVehiclePlate(data.placas),
     unidad_vin: data.unidad_vin,
     anio: data.anio,
     categoria_id: data.categoria_id,
@@ -60,20 +65,33 @@ async function getById(id, db = pool) {
 }
 
 async function createVehiculo(db, clienteId, vehiculo) {
+  const data = sanitizeVehiculoData(vehiculo);
+  await assertVehiclePlateIsUnique(db, data.placas);
   const insert = buildInsert(
-    { cliente_id: clienteId, ...sanitizeVehiculoData(vehiculo) },
+    { cliente_id: clienteId, ...data },
     VEHICULO_INSERT_FIELDS
   );
   if (!insert) return;
   const sql = `INSERT INTO \`${VEHICULO_TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
-  await db.query(sql, insert.values);
+  try {
+    await db.query(sql, insert.values);
+  } catch (err) {
+    await rethrowDuplicateVehiclePlateError(db, err, data.placas);
+  }
 }
 
 async function updateVehiculo(db, clienteId, vehiculo) {
-  const upd = buildUpdateSet(sanitizeVehiculoData(vehiculo), VEHICULO_UPDATE_FIELDS);
+  const data = sanitizeVehiculoData(vehiculo);
+  await assertVehiclePlateIsUnique(db, data.placas, vehiculo.id);
+  const upd = buildUpdateSet(data, VEHICULO_UPDATE_FIELDS);
   if (!upd || !vehiculo.id) return;
   const sql = `UPDATE \`${VEHICULO_TABLE}\` SET ${upd.set} WHERE id = :id AND cliente_id = :cliente_id`;
-  const [result] = await db.query(sql, { ...upd.values, id: vehiculo.id, cliente_id: clienteId });
+  let result;
+  try {
+    [result] = await db.query(sql, { ...upd.values, id: vehiculo.id, cliente_id: clienteId });
+  } catch (err) {
+    await rethrowDuplicateVehiclePlateError(db, err, data.placas, vehiculo.id);
+  }
   if (result.affectedRows === 0) {
     throw Object.assign(new Error('No se encontró el vehículo solicitado para este cliente.'), { status: 400 });
   }
