@@ -1,8 +1,12 @@
 const { pool } = require('../config/db');
 const { verifyToken } = require('../config/jwt');
-const { ROLE_IDS } = require('../config/roles');
+const { buildAccessProfile, loadRoleCatalog } = require('../utils/userAccess');
 
 async function loadUserAccessProfile(userId) {
+  const [users] = await pool.query('SELECT id, activo FROM usuario WHERE id = :id LIMIT 1', { id: userId });
+  if (!users.length || Number(users[0].activo) !== 1) {
+    throw Object.assign(new Error('El usuario no existe o está desactivado.'), { status: 401 });
+  }
   const [roleRows] = await pool.query(
     `SELECT r.\`id\`, r.\`nombre\`, r.\`descripcion\`
        FROM usuario_rol ur
@@ -17,39 +21,8 @@ async function loadUserAccessProfile(userId) {
     descripcion: row.descripcion ?? null,
   }));
 
-  const [sucursalRows] = await pool.query(
-    'SELECT id, nombre FROM cat_sucursal ORDER BY id ASC',
-  );
-
-  const sucursales = sucursalRows.map((row) => ({
-    id: Number(row.id),
-    nombre: row.nombre,
-  }));
-
-  const isAdmin = roles.some((role) => Number(role.id) === ROLE_IDS.ADMINISTRADOR);
-  let allowedSucursalIds = [];
-
-  if (isAdmin) {
-    allowedSucursalIds = sucursales.map((sucursal) => sucursal.id);
-  } else if (roles.length > 0) {
-    const roleIds = roles.map((role) => role.id);
-    const [rolSucursalRows] = await pool.query(
-      `SELECT DISTINCT rs.\`sucursal_id\`
-         FROM \`rol_sucursal\` rs
-        WHERE rs.\`rol_id\` IN (?)`,
-      [roleIds],
-    );
-    allowedSucursalIds = rolSucursalRows.map((row) => Number(row.sucursal_id)).filter(Boolean);
-  }
-
-  const canViewAllOrders = isAdmin || (sucursales.length > 0 && allowedSucursalIds.length === sucursales.length);
-
-  return {
-    roles,
-    is_admin: isAdmin,
-    allowed_sucursal_ids: allowedSucursalIds,
-    can_view_all_orders: canViewAllOrders,
-  };
+  const { sucursales, mappings } = await loadRoleCatalog(pool);
+  return buildAccessProfile(roles, sucursales, mappings);
 }
 
 async function required(req, res, next) {
@@ -67,11 +40,17 @@ async function required(req, res, next) {
   }
 }
 
-function adminOnly(req, res, next) {
-  if (!req.user?.is_admin) {
-    return res.status(403).json({ message: 'No tienes permisos para acceder a este recurso.' });
-  }
-  return next();
+function requireCapability(capability) {
+  return (req, res, next) => {
+    if (!req.user?.[capability]) {
+      return res.status(403).json({ message: 'No tienes permisos para acceder a este recurso.' });
+    }
+    return next();
+  };
 }
 
-module.exports = { required, adminOnly, loadUserAccessProfile };
+const adminOnly = requireCapability('is_admin');
+const reportsOnly = requireCapability('can_view_reports');
+const userManagersOnly = requireCapability('can_manage_users');
+
+module.exports = { required, adminOnly, reportsOnly, userManagersOnly, loadUserAccessProfile };

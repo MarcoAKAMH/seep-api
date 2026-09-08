@@ -2,15 +2,25 @@ const express = require('express');
 const router = express.Router();
 const Joi = require('joi');
 const { pool } = require('../../config/db');
-const { required, adminOnly } = require('../../middleware/auth');
+const { required, reportsOnly } = require('../../middleware/auth');
 const validate = require('../../middleware/validate');
 const asyncHandler = require('../../utils/asyncHandler');
+const { resolveSucursalScope, buildOrderScopeSql } = require('../../utils/sucursalAccess');
 
-router.use(required, adminOnly);
+router.use(required, reportsOnly);
+
+const sucursalQuery = Joi.number().integer().min(1).max(Number.MAX_SAFE_INTEGER).optional();
+const summaryQuery = Joi.object({ sucursal_id: sucursalQuery });
+
+async function reportScope(req) {
+  const scope = await resolveSucursalScope(req.user, req.query.sucursal_id, pool);
+  return { sucursalId: scope.sucursalId, ...buildOrderScopeSql(scope.sucursalIds) };
+}
 
 // GET /api/reports/summary
-router.get('/summary', async (req, res, next) => {
+router.get('/summary', validate(summaryQuery, 'query'), async (req, res, next) => {
   try {
+    const scope = await reportScope(req);
     const [ordersByStatus] = await pool.query(`
       SELECT
         ot.estatus_id AS estatus_id,
@@ -19,20 +29,22 @@ router.get('/summary', async (req, res, next) => {
         COALESCE(SUM(ot.total),0) AS total
       FROM orden_trabajo ot
       LEFT JOIN cat_estatus_orden ce ON ce.id = ot.estatus_id
+      WHERE ${scope.sql}
       GROUP BY ot.estatus_id, estatus
       ORDER BY count DESC
-    `);
+    `, scope.params);
 
     const [monthly] = await pool.query(`
       SELECT
-        DATE_FORMAT(fecha_ingreso, '%Y-%m') AS ym,
+        DATE_FORMAT(ot.fecha_ingreso, '%Y-%m') AS ym,
         COUNT(*) AS count,
-        COALESCE(SUM(total),0) AS total
-      FROM orden_trabajo
+        COALESCE(SUM(ot.total),0) AS total
+      FROM orden_trabajo ot
+      WHERE ${scope.sql}
       GROUP BY ym
       ORDER BY ym DESC
       LIMIT 12
-    `);
+    `, scope.params);
 
     const [topClients] = await pool.query(`
       SELECT
@@ -42,12 +54,14 @@ router.get('/summary', async (req, res, next) => {
         COALESCE(SUM(ot.total),0) AS total
       FROM cliente c
       JOIN orden_trabajo ot ON ot.cliente_id = c.id
+      WHERE ${scope.sql}
       GROUP BY c.id, c.nombre
       ORDER BY ordenes DESC, total DESC
       LIMIT 10
-    `);
+    `, scope.params);
 
     res.json({
+      params: { sucursal_id: scope.sucursalId },
       ordersByStatus: ordersByStatus.map((r) => ({
         estatus_id: Number(r.estatus_id),
         estatus: r.estatus,
@@ -70,6 +84,7 @@ router.get('/summary', async (req, res, next) => {
 });
 
 const ventasTotalesQuery = Joi.object({
+  sucursal_id: sucursalQuery,
   inicio: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   fin: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   meta: Joi.number().min(0).precision(2).default(0),
@@ -78,6 +93,7 @@ const ventasTotalesQuery = Joi.object({
 // GET /api/reports/ventas_totales?inicio=YYYY-MM-DD&fin=YYYY-MM-DD&meta=1234.56
 // Nota: devuelve SOLO días con ventas (como el Excel).
 router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandler(async (req, res) => {
+  const scope = await reportScope(req);
   const inicio = String(req.query.inicio);
   const fin = String(req.query.fin);
   const meta = Number(req.query.meta || 0);
@@ -94,11 +110,12 @@ router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandle
       LEFT JOIN vehiculo v ON v.id = ot.vehiculo_id
       LEFT JOIN cat_categoria_vehiculo ccv ON ccv.id = v.categoria_id
       WHERE ot.entrega_at IS NOT NULL
+        AND ${scope.sql}
         AND ${fechaEntregaLocal} >= :inicio
         AND ${fechaEntregaLocal} <= :fin
       GROUP BY tipo, fecha
       ORDER BY tipo ASC, fecha ASC`,
-    { inicio, fin }
+    { inicio, fin, ...scope.params }
   );
 
   const byTipo = new Map();
@@ -139,12 +156,13 @@ router.get('/ventas_totales', validate(ventasTotalesQuery, 'query'), asyncHandle
   });
 
   res.json({
-    params: { inicio, fin, meta },
+    params: { inicio, fin, meta, sucursal_id: scope.sucursalId },
     categorias,
   });
 }));
 
 const trabajadoresQuery = Joi.object({
+  sucursal_id: sucursalQuery,
   inicio: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   fin: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   meta: Joi.number().min(0).precision(2).default(0),
@@ -204,6 +222,7 @@ function calcPromedioCumplimiento(rows, meta, dias) {
 
 // GET /api/reports/resultado_trabajadores?inicio=YYYY-MM-DD&fin=YYYY-MM-DD&meta=1000&dias=6
 router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyncHandler(async (req, res) => {
+  const scope = await reportScope(req);
   const inicio = String(req.query.inicio);
   const fin = String(req.query.fin);
   const meta = Number(req.query.meta || 0);
@@ -223,9 +242,10 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
     FROM orden_trabajo ot
     JOIN orden_asignacion oa ON oa.orden_id = ot.id
     WHERE ot.entrega_at IS NOT NULL
+      AND ${scope.sql}
       AND ${fechaEntregaLocal} >= :inicio
       AND ${fechaEntregaLocal} <= :fin`,
-    { inicio, fin }
+    { inicio, fin, ...scope.params }
   );
 
   // order -> { fecha, total_venta, countsByEmpleado }
@@ -266,7 +286,7 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
 
   const empleadoIds = Array.from(agg.keys());
   if (empleadoIds.length === 0) {
-    return res.json({ params: { inicio, fin, meta, dias, base }, trabajadores: [] });
+    return res.json({ params: { inicio, fin, meta, dias, base, sucursal_id: scope.sucursalId }, trabajadores: [] });
   }
 
   const [emps] = await pool.query(
@@ -313,10 +333,11 @@ router.get('/resultado_trabajadores', validate(trabajadoresQuery, 'query'), asyn
     })
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-  res.json({ params: { inicio, fin, meta, dias, base }, trabajadores });
+  res.json({ params: { inicio, fin, meta, dias, base, sucursal_id: scope.sucursalId }, trabajadores });
 }));
 
 const detalleQuery = Joi.object({
+  sucursal_id: sucursalQuery,
   empleado_id: Joi.number().integer().required(),
   fecha: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
   base: Joi.string().valid('total', 'mano_obra', 'repuestos').default('total'),
@@ -324,6 +345,7 @@ const detalleQuery = Joi.object({
 
 // GET /api/reports/resultado_trabajadores/details?empleado_id=1&fecha=YYYY-MM-DD
 router.get('/resultado_trabajadores/details', validate(detalleQuery, 'query'), asyncHandler(async (req, res) => {
+  const scope = await reportScope(req);
   const empleado_id = Number(req.query.empleado_id);
   const fecha = String(req.query.fecha);
   const base = String(req.query.base || 'total');
@@ -341,8 +363,9 @@ router.get('/resultado_trabajadores/details', validate(detalleQuery, 'query'), a
     FROM orden_trabajo ot
     JOIN orden_asignacion oa ON oa.orden_id = ot.id
     WHERE ot.entrega_at IS NOT NULL
+      AND ${scope.sql}
       AND ${fechaEntregaLocal} = :fecha`,
-    { fecha }
+    { fecha, ...scope.params }
   );
 
   // Reconstruir orders map como en el reporte principal
@@ -387,7 +410,7 @@ router.get('/resultado_trabajadores/details', validate(detalleQuery, 'query'), a
   // Ordenar por total descendente
   details.sort((a, b) => b.share - a.share);
 
-  res.json({ params: { empleado_id, fecha, base }, orders: details });
+  res.json({ params: { empleado_id, fecha, base, sucursal_id: scope.sucursalId }, orders: details });
 }));
 
 module.exports = router;

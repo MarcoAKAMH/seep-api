@@ -1,24 +1,26 @@
 const express = require('express');
 const asyncHandler = require('../../utils/asyncHandler');
 const validate = require('../../middleware/validate');
-const { required, adminOnly } = require('../../middleware/auth');
+const { required, adminOnly, userManagersOnly } = require('../../middleware/auth');
 const v = require('./validators');
 const aux = require('./auxiliaries');
 
 const router = express.Router();
 
-router.use(required, adminOnly);
+router.use(required, userManagersOnly);
 
 router.get('/', validate(v.listQuery, 'query'), asyncHandler(async (req, res) => {
-  const rows = await aux.list(req.query);
+  const rows = await aux.list(req.query, req.user);
   res.json(rows);
 }));
 
 router.get('/:id', validate(v.idParam, 'params'), asyncHandler(async (req, res) => {
-  const row = await aux.getById(Number(req.params.id));
+  const row = await aux.getById(Number(req.params.id), req.user);
   if (!row) return res.status(404).json({ message: 'No se encontró el recurso solicitado.' });
   res.json(row);
 }));
+
+router.use(adminOnly);
 
 router.post('/', validate(v.create), asyncHandler(async (req, res) => {
   const created = await aux.createOne(req.body);
