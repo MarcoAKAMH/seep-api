@@ -1,4 +1,5 @@
 const { pool } = require('../../config/db');
+const { getAssignableRoleIds } = require('../../utils/userAccess');
 const { buildUpdateSet, buildInsert } = require('../../utils/sql');
 
 const TABLE = 'rol';
@@ -11,14 +12,17 @@ function columnList(fields) {
   return fields.map(f => `\`${f}\``).join(', ');
 }
 
-async function list({ limit = 50, offset = 0 }) {
+async function list({ limit = 50, offset = 0 }, user) {
   const cols = columnList(SELECT_FIELDS);
-  const sql = `SELECT ${cols} FROM \`${TABLE}\` LIMIT :limit OFFSET :offset`;
-  const [rows] = await pool.query(sql, { limit, offset });
+  const ids = getAssignableRoleIds(user);
+  if (!user?.is_admin && !ids.length) return [];
+  const sql = `SELECT ${cols} FROM \`${TABLE}\` ${user?.is_admin ? '' : 'WHERE id IN (?)'} ORDER BY id ASC LIMIT ? OFFSET ?`;
+  const [rows] = await pool.query(sql, user?.is_admin ? [limit, offset] : [ids, limit, offset]);
   return rows;
 }
 
-async function getById(id) {
+async function getById(id, user) {
+  if (user && !user.is_admin && !getAssignableRoleIds(user).includes(id)) return null;
   const cols = columnList(SELECT_FIELDS);
   const sql = `SELECT ${cols} FROM \`${TABLE}\` WHERE id = :id LIMIT 1`;
   const [rows] = await pool.query(sql, { id });

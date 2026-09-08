@@ -1,5 +1,6 @@
 const { pool } = require('../../config/db');
 const { buildUpdateSet, buildInsert } = require('../../utils/sql');
+const { getOrderScope, assertSucursalAccess, resolveSucursalScope, buildOrderScopeSql } = require('../../utils/sucursalAccess');
 
 const TABLE = 'orden_trabajo';
 const ASIGNACION_TABLE = 'orden_asignacion';
@@ -19,16 +20,6 @@ function columnList(fields, tableAlias = null) {
   return fields.map((f) => `${tableAlias}.\`${f}\``).join(', ');
 }
 
-function getAllowedSucursalIds(user) {
-  return Array.isArray(user?.allowed_sucursal_ids)
-    ? user.allowed_sucursal_ids.map((id) => Number(id)).filter(Boolean)
-    : [];
-}
-
-function canViewAllOrders(user) {
-  return Boolean(user?.is_admin || user?.can_view_all_orders);
-}
-
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -38,15 +29,6 @@ function normalizeComparableText(value) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
-}
-
-function assertSucursalAccess(user, sucursalId) {
-  if (canViewAllOrders(user)) return;
-
-  const allowedSucursalIds = getAllowedSucursalIds(user);
-  if (!allowedSucursalIds.includes(Number(sucursalId))) {
-    throw Object.assign(new Error('No tienes permisos para operar órdenes de esta sucursal.'), { status: 403 });
-  }
 }
 
 async function getVehiculoWithCategoria(connection, vehiculoId) {
@@ -170,11 +152,11 @@ async function replaceSucursal(connection, ordenId, sucursalId) {
   );
 }
 
-async function hydrateSucursales(rows) {
+async function hydrateSucursales(rows, connection = pool) {
   if (!rows.length) return rows;
 
   const ordenIds = rows.map((row) => row.id);
-  const [sucursales] = await pool.query(
+  const [sucursales] = await connection.query(
     `SELECT \`orden_id\`, \`sucursal_id\`
        FROM \`${ORDEN_SUCURSAL_TABLE}\`
       WHERE \`orden_id\` IN (?)`,
@@ -222,44 +204,26 @@ async function replaceAsignaciones(connection, ordenId, reparadores = [], desmon
   );
 }
 
-async function list({ limit = 50, offset = 0 }, user) {
+async function list({ limit = 50, offset = 0, sucursal_id }, user) {
+  const scope = await resolveSucursalScope(user, sucursal_id, pool);
+  const predicate = buildOrderScopeSql(scope.sucursalIds);
   const cols = columnList(SELECT_FIELDS, 'ot');
-  let sql = `SELECT ${cols} FROM \`${TABLE}\` ot`;
-  const queryParams = [];
-
-  if (!canViewAllOrders(user)) {
-    const allowedSucursalIds = getAllowedSucursalIds(user);
-    if (allowedSucursalIds.length === 0) return [];
-    sql += ` INNER JOIN \`${ORDEN_SUCURSAL_TABLE}\` os ON os.\`orden_id\` = ot.\`id\`
-             WHERE os.\`sucursal_id\` IN (?)`;
-    queryParams.push(allowedSucursalIds);
-  }
-
-  sql += ` LIMIT ? OFFSET ?`;
-  queryParams.push(limit, offset);
-  const [rows] = await pool.query(sql, queryParams);
+  const sql = `SELECT ${cols} FROM \`${TABLE}\` ot
+                WHERE ${predicate.sql}
+                ORDER BY ot.id ASC
+                LIMIT :limit OFFSET :offset`;
+  const [rows] = await pool.query(sql, { ...predicate.params, limit, offset });
   return hydrateSucursales(rows);
 }
 
-async function getById(id, user) {
+async function getById(id, user, connection = pool, forUpdate = false) {
+  const predicate = buildOrderScopeSql(getOrderScope(user));
   const cols = columnList(SELECT_FIELDS, 'ot');
-  let sql = `SELECT ${cols} FROM \`${TABLE}\` ot WHERE ot.\`id\` = ?`;
-  const queryParams = [id];
-
-  if (!canViewAllOrders(user)) {
-    const allowedSucursalIds = getAllowedSucursalIds(user);
-    if (allowedSucursalIds.length === 0) return null;
-    sql = `SELECT ${cols}
-             FROM \`${TABLE}\` ot
-             INNER JOIN \`${ORDEN_SUCURSAL_TABLE}\` os ON os.\`orden_id\` = ot.\`id\`
-            WHERE ot.\`id\` = ?
-              AND os.\`sucursal_id\` IN (?)`;
-    queryParams.push(allowedSucursalIds);
-  }
-
-  sql += ' LIMIT 1';
-  const [rows] = await pool.query(sql, queryParams);
-  const hydratedRows = await hydrateSucursales(rows);
+  const sql = `SELECT ${cols} FROM \`${TABLE}\` ot
+                WHERE ot.id = :id AND ${predicate.sql}
+                LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`;
+  const [rows] = await connection.query(sql, { id, ...predicate.params });
+  const hydratedRows = await hydrateSucursales(rows, connection);
   return hydratedRows[0] || null;
 }
 
@@ -315,7 +279,7 @@ async function updateOne(id, data, user) {
   try {
     await connection.beginTransaction();
 
-    const currentOrder = await getById(id, user);
+    const currentOrder = await getById(id, user, connection, true);
     if (!currentOrder) {
       await connection.rollback();
       return null;
@@ -363,12 +327,15 @@ async function updateOne(id, data, user) {
 }
 
 async function removeOne(id, user) {
-  const currentOrder = await getById(id, user);
-  if (!currentOrder) return false;
-
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+
+    const currentOrder = await getById(id, user, connection, true);
+    if (!currentOrder) {
+      await connection.rollback();
+      return false;
+    }
 
     await connection.query(
       `DELETE FROM \`${ORDEN_SUCURSAL_TABLE}\` WHERE \`orden_id\` = :orden_id`,

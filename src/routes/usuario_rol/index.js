@@ -28,6 +28,7 @@ router.post('/', validate(v.create), asyncHandler(async (req, res) => {
 router.put('/:usuario_id/:rol_id', validate(v.keyParams, 'params'), validate(v.update), asyncHandler(async (req, res) => {
   const keys = { usuario_id: Number(req.params.usuario_id), rol_id: Number(req.params.rol_id) };
   const updated = await aux.updateOne(keys, req.body);
+  if (!updated) return res.status(404).json({ message: 'No se encontró la asignación solicitada.' });
   res.json(updated);
 }));
 

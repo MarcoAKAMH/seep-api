@@ -3,6 +3,7 @@ const Joi = require('joi');
 const MAX_ID = 9007199254740991;
 
 const listQuery = Joi.object({
+  sucursal_id: Joi.number().integer().min(1).max(MAX_ID).optional(),
   limit: Joi.number().integer().min(1).max(200).default(50),
   offset: Joi.number().integer().min(0).default(0),
 });

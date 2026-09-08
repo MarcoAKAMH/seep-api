@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { pool } = require('../../config/db');
-const { ROLE_IDS } = require('../../config/roles');
+const { normalizeRoleIds, buildUserScopeSql } = require('../../utils/userAccess');
 const { buildUpdateSet, buildInsert } = require('../../utils/sql');
 
 const TABLE = 'usuario';
@@ -44,80 +44,39 @@ async function hydrateRoles(rows, connection = pool) {
   }));
 }
 
-async function normalizeRoleIds(connection, roleIds) {
-  const uniqueRoleIds = Array.from(new Set((roleIds || []).map((id) => Number(id)).filter(Boolean)));
-  if (uniqueRoleIds.length === 0) {
-    throw Object.assign(new Error('Selecciona al menos un rol.'), { status: 400 });
-  }
-
-  const [rows] = await connection.query(
-    `SELECT \`id\`, \`nombre\`
-       FROM \`${ROL_TABLE}\`
-      WHERE \`id\` IN (?)`,
-    [uniqueRoleIds],
-  );
-
-  if (rows.length !== uniqueRoleIds.length) {
-    throw Object.assign(new Error('Uno o más roles seleccionados no existen.'), { status: 400 });
-  }
-
-  const hasAdmin = rows.some((row) => Number(row.id) === ROLE_IDS.ADMINISTRADOR);
-  if (hasAdmin && rows.length > 1) {
-    throw Object.assign(new Error('El rol Admin no se puede combinar con otros roles.'), { status: 400 });
-  }
-
-  return rows.map((row) => row.id);
-}
-
 async function replaceUserRoles(connection, userId, roleIds) {
-  await connection.query(
-    `DELETE FROM \`${USUARIO_ROL_TABLE}\` WHERE \`usuario_id\` = :usuario_id`,
-    { usuario_id: userId },
-  );
-
-  if (!roleIds?.length) return;
-
-  const values = roleIds.map((roleId) => [userId, roleId]);
-  await connection.query(
-    `INSERT INTO \`${USUARIO_ROL_TABLE}\` (\`usuario_id\`, \`rol_id\`) VALUES ?`,
-    [values],
-  );
+  await connection.query('DELETE FROM usuario_rol WHERE usuario_id = :id', { id: userId });
+  if (roleIds.length) await connection.query('INSERT INTO usuario_rol (usuario_id, rol_id) VALUES ?', [roleIds.map((id) => [userId, id])]);
 }
 
-async function list({ limit = 50, offset = 0 }) {
-  const cols = columnList(SELECT_FIELDS);
-  const sql = `SELECT ${cols} FROM \`${TABLE}\` LIMIT :limit OFFSET :offset`;
-  const [rows] = await pool.query(sql, { limit, offset });
+async function list({ limit = 50, offset = 0 }, user) {
+  const access = buildUserScopeSql(user);
+  const [rows] = await pool.query(
+    `SELECT ${SELECT_FIELDS.map((field) => 'u.' + field).join(', ')} FROM usuario u
+     WHERE ${access.sql} ORDER BY u.id ASC LIMIT :limit OFFSET :offset`,
+    { ...access.params, limit, offset },
+  );
   return hydrateRoles(rows);
 }
 
-async function getById(id) {
-  const cols = columnList(SELECT_FIELDS);
-  const sql = `SELECT ${cols} FROM \`${TABLE}\` WHERE id = :id LIMIT 1`;
-  const [rows] = await pool.query(sql, { id });
-  const hydratedRows = await hydrateRoles(rows);
-  return hydratedRows[0] || null;
+async function getById(id, user, connection = pool, lock = false) {
+  const access = buildUserScopeSql(user);
+  const [rows] = await connection.query(
+    `SELECT ${SELECT_FIELDS.map((field) => 'u.' + field).join(', ')} FROM usuario u
+     WHERE u.id = :id AND ${access.sql} LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
+    { ...access.params, id },
+  );
+  const hydrated = await hydrateRoles(rows, connection);
+  return hydrated[0] || null;
 }
 
-async function createOne(data) {
-  const { password, role_ids, ...rest } = data;
-  const password_hash = await bcrypt.hash(password, 10);
-  const payload = { ...rest, password_hash };
-
+async function transaction(work) {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-
-    const normalizedRoleIds = await normalizeRoleIds(connection, role_ids);
-    const insert = buildInsert(payload, [...INSERT_FIELDS, 'password_hash']);
-    if (!insert) throw Object.assign(new Error('No se enviaron datos para guardar.'), { status: 400 });
-    const sql = `INSERT INTO \`${TABLE}\` (${insert.cols}) VALUES (${insert.params})`;
-    const [result] = await connection.query(sql, insert.values);
-
-    await replaceUserRoles(connection, result.insertId, normalizedRoleIds);
-
+    const result = await work(connection);
     await connection.commit();
-    return getById(result.insertId);
+    return result;
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -126,78 +85,45 @@ async function createOne(data) {
   }
 }
 
-async function updateOne(id, data) {
-  const next = { ...data };
-  const roleIds = Object.prototype.hasOwnProperty.call(next, 'role_ids') ? next.role_ids : undefined;
-  delete next.role_ids;
-  if (next.password !== undefined) {
-    next.password_hash = await bcrypt.hash(next.password, 10);
-    delete next.password;
-  }
-  const upd = buildUpdateSet(next, [...UPDATE_FIELDS, 'password_hash']);
-  const shouldReplaceRoles = roleIds !== undefined;
-
-  if (!upd && !shouldReplaceRoles) throw Object.assign(new Error('No se enviaron datos para actualizar.'), { status: 400 });
-
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-
-    if (shouldReplaceRoles) {
-      const normalizedRoleIds = await normalizeRoleIds(connection, roleIds);
-      await replaceUserRoles(connection, id, normalizedRoleIds);
-    }
-
-    if (upd) {
-      const sql = `UPDATE \`${TABLE}\` SET ${upd.set} WHERE id = :id`;
-      const [result] = await connection.query(sql, { ...upd.values, id });
-      if (result.affectedRows === 0) {
-        await connection.rollback();
-        return null;
-      }
-    } else {
-      const [rows] = await connection.query(
-        `SELECT \`id\` FROM \`${TABLE}\` WHERE \`id\` = :id LIMIT 1`,
-        { id },
-      );
-      if (rows.length === 0) {
-        await connection.rollback();
-        return null;
-      }
-    }
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-
-  return getById(id);
+async function createOne(data, user) {
+  return transaction(async (connection) => {
+    const roleIds = await normalizeRoleIds(connection, data.role_ids, user);
+    const password_hash = await bcrypt.hash(data.password, 10);
+    const insert = buildInsert({ ...data, password_hash }, [...INSERT_FIELDS, 'password_hash']);
+    const [result] = await connection.query(`INSERT INTO usuario (${insert.cols}) VALUES (${insert.params})`, insert.values);
+    await replaceUserRoles(connection, result.insertId, roleIds);
+    return getById(result.insertId, user, connection);
+  });
 }
 
-async function removeOne(id) {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    await connection.query(
-      `DELETE FROM \`${USUARIO_ROL_TABLE}\` WHERE \`usuario_id\` = :usuario_id`,
-      { usuario_id: id },
-    );
-    await connection.query(
-      `DELETE FROM \`${AUTH_REFRESH_TOKEN_TABLE}\` WHERE \`usuario_id\` = :usuario_id`,
-      { usuario_id: id },
-    );
-    const [result] = await connection.query(`DELETE FROM \`${TABLE}\` WHERE id = :id`, { id });
-    await connection.commit();
+async function updateOne(id, data, user) {
+  return transaction(async (connection) => {
+    // Authorize the existing account before changing its password or roles.
+    const current = await getById(id, user, connection, true);
+    if (!current) return null;
+    const payload = { ...data };
+    if (payload.role_ids !== undefined) {
+      const roles = await normalizeRoleIds(connection, payload.role_ids, user);
+      await replaceUserRoles(connection, id, roles);
+    }
+    if (payload.password !== undefined) payload.password_hash = await bcrypt.hash(payload.password, 10);
+    const update = buildUpdateSet(payload, [...UPDATE_FIELDS, 'password_hash']);
+    if (update) await connection.query(`UPDATE usuario SET ${update.set} WHERE id = :id`, { ...update.values, id });
+    if (payload.password !== undefined || payload.role_ids !== undefined || payload.activo !== undefined) {
+      await connection.query('UPDATE auth_refresh_token SET revoked_at = COALESCE(revoked_at, NOW()) WHERE usuario_id = :id', { id });
+    }
+    return getById(id, user, connection);
+  });
+}
+
+async function removeOne(id, user) {
+  return transaction(async (connection) => {
+    if (!(await getById(id, user, connection, true))) return false;
+    await connection.query('DELETE FROM usuario_rol WHERE usuario_id = :id', { id });
+    await connection.query('DELETE FROM auth_refresh_token WHERE usuario_id = :id', { id });
+    const [result] = await connection.query('DELETE FROM usuario WHERE id = :id', { id });
     return result.affectedRows > 0;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+  });
 }
 
 module.exports = { list, getById, createOne, updateOne, removeOne };

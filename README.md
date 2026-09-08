@@ -1,5 +1,49 @@
   # SEEP Node API (MySQL + Express + Joi + JWT)
 
+## Administradores por sucursal
+
+El rol 1 conserva la administración global. Los roles 4 y 5 administran la sucursal
+asociada a los agentes 2 y 3, respectivamente, mediante `rol_sucursal`. Los nombres
+de los roles nuevos se obtienen del catálogo de sucursales (Alameda y Chapala en
+la configuración actual).
+
+Desde `seep-api`, revisar y aplicar la migración idempotente:
+
+```powershell
+node scripts/migrate-branch-admins.js --check
+npm run migrate:branch-admins
+```
+
+El script carga `.env` y después `.env.local`, valida IDs y asociaciones y agrega
+únicamente los roles y relaciones faltantes. No crea cuentas ni cambia usuarios
+existentes. El administrador global puede asignar los nuevos roles desde Usuarios.
+
+- Global: todos los usuarios y roles; reportes de ambas sucursales por defecto o
+  una sucursal elegida mediante `sucursal_id`.
+- Administrador de sucursal: operación, reportes y usuarios de su sucursal.
+  Puede crear, editar y eliminar agentes o administradores de esa misma sucursal.
+  No puede gestionar cuentas globales, de otra sucursal, sin rol o con acceso a
+  varias sucursales.
+- Agentes: mantienen su operación y no acceden a reportes ni a Usuarios.
+
+Los reportes devuelven `params.sucursal_id` con el alcance aplicado (`null` para
+ambas). La sucursal se valida antes de calcular totales, comisiones y detalles.
+Usuarios, roles y órdenes se filtran antes de paginar. Técnicos, festivos y metas
+generales siguen bajo administración global. Las sesiones recargan permisos en
+cada petición; login y refresh incluyen `can_view_reports` y `can_manage_users`.
+
+Pruebas de autorización sin conexión a base de datos: `npm test`.
+Para probar HTTP y MySQL con el esquema configurado:
+
+```powershell
+$env:SEEP_MYSQL_TESTS = '1'
+node --test test/mysql-access.test.js
+```
+
+La prueba de integración requiere permiso para crear una base temporal con
+prefijo `seep_test_scope_`. Copia solo estructuras, usa datos ficticios y elimina
+esa base al terminar; no copia ni modifica los registros de negocio.
+
   API REST lista para conectar tu DB MySQL (esquema `seep_taller`) con tu app React.
 
   Incluye:
