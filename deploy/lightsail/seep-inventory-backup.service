@@ -1,0 +1,11 @@
+[Unit]
+Description=SEEP - respaldo de inventario
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/ubuntu/seep-api
+EnvironmentFile=/home/ubuntu/seep-api/.env
+ExecStart=/home/ubuntu/seep-api/ops/tasks/inventory-backup.sh

@@ -30,6 +30,7 @@ const rol_permiso = require('./rol_permiso');
 const router = express.Router();
 
 router.use('/auth', authRoutes);
+router.use('/inventario', require('./inventario'));
 
 // Tables
 router.use('/cat_tipo_cliente', cat_tipo_cliente);

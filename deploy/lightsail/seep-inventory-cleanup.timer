@@ -1,0 +1,9 @@
+[Unit]
+Description=SEEP - limpieza semanal de archivos del inventario
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00 America/Mexico_City
+Persistent=true
+
+[Install]
+WantedBy=timers.target

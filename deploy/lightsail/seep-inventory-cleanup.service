@@ -1,0 +1,10 @@
+[Unit]
+Description=SEEP - limpieza de archivos huérfanos del inventario
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/seep-api
+EnvironmentFile=/home/ubuntu/seep-api/.env
+ExecStart=/home/ubuntu/seep-api/ops/tasks/inventory-media-cleanup.sh

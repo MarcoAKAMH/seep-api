@@ -1,0 +1,11 @@
+[Unit]
+Description=SEEP - programar conteos semanales
+After=network-online.target seep-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/seep-api
+EnvironmentFile=/home/ubuntu/seep-api/.env
+ExecStart=/home/ubuntu/seep-api/ops/tasks/inventory-counts.sh

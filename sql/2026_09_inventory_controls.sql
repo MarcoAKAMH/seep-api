@@ -1,0 +1,77 @@
+-- Stage 4: transfers, physical adjustments and one-time document reversals.
+CREATE TABLE inv_transferencia (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  folio VARCHAR(80) NOT NULL,
+  sucursal_origen_id BIGINT UNSIGNED NOT NULL,
+  almacen_origen_id BIGINT UNSIGNED NOT NULL,
+  ubicacion_origen_id BIGINT UNSIGNED NOT NULL,
+  sucursal_destino_id BIGINT UNSIGNED NOT NULL,
+  almacen_destino_id BIGINT UNSIGNED NOT NULL,
+  ubicacion_destino_id BIGINT UNSIGNED NOT NULL,
+  estado ENUM('DESPACHADA','RECIBIDA') NOT NULL DEFAULT 'DESPACHADA',
+  motivo VARCHAR(500) NOT NULL,
+  referencia VARCHAR(180) NULL,
+  idempotencia VARCHAR(80) NOT NULL,
+  documento_salida_id BIGINT UNSIGNED NOT NULL,
+  documento_entrada_id BIGINT UNSIGNED NULL,
+  creado_por BIGINT UNSIGNED NOT NULL,
+  recibido_por BIGINT UNSIGNED NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  recibido_at DATETIME(6) NULL,
+  UNIQUE KEY uq_inv_transferencia_folio (folio),
+  UNIQUE KEY uq_inv_transferencia_request (idempotencia),
+  KEY ix_inv_transferencia_origen (sucursal_origen_id, estado, created_at),
+  KEY ix_inv_transferencia_destino (sucursal_destino_id, estado, created_at),
+  FOREIGN KEY (almacen_origen_id, sucursal_origen_id) REFERENCES inv_almacen(id, sucursal_id),
+  FOREIGN KEY (ubicacion_origen_id, almacen_origen_id, sucursal_origen_id) REFERENCES inv_ubicacion(id, almacen_id, sucursal_id),
+  FOREIGN KEY (almacen_destino_id, sucursal_destino_id) REFERENCES inv_almacen(id, sucursal_id),
+  FOREIGN KEY (ubicacion_destino_id, almacen_destino_id, sucursal_destino_id) REFERENCES inv_ubicacion(id, almacen_id, sucursal_id),
+  FOREIGN KEY (documento_salida_id) REFERENCES inv_documento(id),
+  FOREIGN KEY (documento_entrada_id) REFERENCES inv_documento(id),
+  FOREIGN KEY (creado_por) REFERENCES usuario(id),
+  FOREIGN KEY (recibido_por) REFERENCES usuario(id),
+  CONSTRAINT ck_inv_transferencia_sucursales CHECK (sucursal_origen_id <> sucursal_destino_id),
+  CONSTRAINT ck_inv_transferencia_recibida CHECK (estado <> 'RECIBIDA' OR (documento_entrada_id IS NOT NULL AND recibido_por IS NOT NULL AND recibido_at IS NOT NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE inv_transferencia_detalle (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  transferencia_id BIGINT UNSIGNED NOT NULL,
+  producto_id BIGINT UNSIGNED NOT NULL,
+  cantidad DECIMAL(18,6) NOT NULL,
+  costo_unitario DECIMAL(18,6) NOT NULL,
+  UNIQUE KEY uq_inv_transferencia_producto (transferencia_id, producto_id),
+  FOREIGN KEY (transferencia_id) REFERENCES inv_transferencia(id),
+  FOREIGN KEY (producto_id) REFERENCES inv_producto(id),
+  CONSTRAINT ck_inv_transferencia_detalle CHECK (cantidad > 0 AND costo_unitario >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE inv_ajuste_solicitud (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  sucursal_id BIGINT UNSIGNED NOT NULL,
+  producto_id BIGINT UNSIGNED NOT NULL,
+  almacen_id BIGINT UNSIGNED NOT NULL,
+  ubicacion_id BIGINT UNSIGNED NOT NULL,
+  existencia_sistema DECIMAL(18,6) NOT NULL,
+  cantidad_contada DECIMAL(18,6) NOT NULL,
+  diferencia DECIMAL(18,6) GENERATED ALWAYS AS (cantidad_contada - existencia_sistema) STORED,
+  costo_unitario DECIMAL(18,6) NULL,
+  motivo VARCHAR(500) NOT NULL,
+  estado ENUM('PENDIENTE','APROBADO','RECHAZADO') NOT NULL DEFAULT 'PENDIENTE',
+  solicitado_por BIGINT UNSIGNED NOT NULL,
+  decidido_por BIGINT UNSIGNED NULL,
+  documento_id BIGINT UNSIGNED NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  decidido_at DATETIME(6) NULL,
+  KEY ix_inv_ajuste_pendiente (estado, sucursal_id, created_at),
+  FOREIGN KEY (producto_id, almacen_id, sucursal_id) REFERENCES inv_producto_almacen(producto_id, almacen_id, sucursal_id),
+  FOREIGN KEY (ubicacion_id, almacen_id, sucursal_id) REFERENCES inv_ubicacion(id, almacen_id, sucursal_id),
+  FOREIGN KEY (solicitado_por) REFERENCES usuario(id),
+  FOREIGN KEY (decidido_por) REFERENCES usuario(id),
+  FOREIGN KEY (documento_id) REFERENCES inv_documento(id),
+  CONSTRAINT ck_inv_ajuste_cantidades CHECK (existencia_sistema >= 0 AND cantidad_contada >= 0 AND (costo_unitario IS NULL OR costo_unitario >= 0)),
+  CONSTRAINT ck_inv_ajuste_decision CHECK (estado = 'PENDIENTE' OR (decidido_por IS NOT NULL AND decidido_at IS NOT NULL)),
+  CONSTRAINT ck_inv_ajuste_aprobado CHECK (estado <> 'APROBADO' OR documento_id IS NOT NULL)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE inv_documento ADD UNIQUE KEY uq_inv_documento_reversa (documento_origen_id, tipo);

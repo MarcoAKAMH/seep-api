@@ -1,0 +1,10 @@
+[Unit]
+Description=SEEP - respaldo diario de inventario
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 America/Mexico_City
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

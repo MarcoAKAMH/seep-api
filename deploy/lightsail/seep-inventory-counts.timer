@@ -1,0 +1,9 @@
+[Unit]
+Description=SEEP - conteos de inventario cada lunes
+
+[Timer]
+OnCalendar=Mon *-*-* 07:00:00 America/Mexico_City
+Persistent=true
+
+[Install]
+WantedBy=timers.target

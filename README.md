@@ -1,5 +1,18 @@
   # SEEP Node API (MySQL + Express + Joi + JWT)
 
+## Inventario independiente
+
+Etapa 1: estructura MySQL y permisos globales/por sucursal. Consultar
+[alcance, migración, pruebas y siguientes etapas](docs/inventario-etapa-1.md).
+Comprobar con `npm run inventory:check` y aplicar con `npm run inventory:migrate`.
+La [etapa 2](docs/inventario-etapa-2.md) incorpora catálogo, pantallas, fotos y lectura
+de códigos. La [etapa 3](docs/inventario-etapa-3.md) incorpora existencias, entradas,
+salidas, promedio ponderado, kardex y la carga de prueba del Excel de Alameda.
+Las [etapas 4 a 7](docs/inventario-etapa-7.md) agregan transferencias, ajustes autorizados,
+alertas, reportes, compras, proveedores y conteos cíclicos semanales con evidencia fotográfica.
+La [etapa 8](docs/inventario-etapa-8.md) prepara exportaciones, respaldo verificable,
+retención de fotografías, automatización de Windows y aceptación local.
+
 ## Administradores por sucursal
 
 El rol 1 conserva la administración global. Los roles 4 y 5 administran la sucursal
