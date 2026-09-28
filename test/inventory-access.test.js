@@ -16,12 +16,13 @@ test('inventory excludes agents, mixed roles and invalid branch mappings', () =>
   assert.throws(() => inventoryScope(buildAccessProfile([{ id: 4 }], branches, [])), { status: 403 });
 });
 
-test('global manages catalog and authorizations; branch admins only operate their own inventory', () => {
+test('only the global administrator can manage inventory', () => {
   assert.equal(inventoryScope(profile(1)), null);
   assert.equal(profile(1).can_manage_inventory_catalog, true);
   assert.equal(profile(1).can_authorize_inventory_adjustments, true);
-  for (const [role, branch] of [[4,11],[5,22]]) {
-    assert.deepEqual(inventoryScope(profile(role)), [branch]);
+  for (const role of [4, 5]) {
+    assert.equal(profile(role).can_manage_inventory, false);
+    assert.throws(() => inventoryScope(profile(role)), { status: 403 });
     assert.equal(profile(role).can_manage_inventory_catalog, false);
     assert.equal(profile(role).can_authorize_inventory_adjustments, false);
   }
@@ -30,7 +31,7 @@ test('global manages catalog and authorizations; branch admins only operate thei
 test('scope validates explicit branch selections before database access', async () => {
   let calls = 0;
   const db = { query: async (sql, { id }) => { calls++; return [branches.filter(b => b.id === id)]; } };
-  assert.deepEqual(await resolveInventoryScope(profile(4), undefined, db), { sucursalId: 11, sucursalIds: [11] });
+  await assert.rejects(resolveInventoryScope(profile(4), undefined, db), { status: 403 });
   await assert.rejects(resolveInventoryScope(profile(4), 22, db), { status: 403 });
   for (const id of [null, '', true, [], [11], {}, 'all', '11 OR 1=1', 1.5, 0, -1, Number.MAX_SAFE_INTEGER + 1]) {
     await assert.rejects(resolveInventoryScope(profile(1), id, db), { status: 400 });
@@ -49,5 +50,8 @@ test('middleware denies agents even with all-order access', () => {
   inventoryOnly({ user: profile(2, 3) }, {}, e => { error = e; });
   assert.equal(error.status, 403);
   inventoryOnly({ user: profile(4) }, {}, e => { error = e; });
+  assert.equal(error.status, 403);
+  error = undefined;
+  inventoryOnly({ user: profile(1) }, {}, e => { error = e; });
   assert.equal(error, undefined);
 });

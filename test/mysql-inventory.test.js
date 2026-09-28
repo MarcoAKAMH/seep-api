@@ -438,11 +438,8 @@ test('inventory migration, constraints and authenticated HTTP access', { skip: p
       assert.equal((await request(2, '?sucursal_id=22')).status, 403);
       assert.equal((await request(3, '?sucursal_id=11')).status, 403);
       assert.equal((await request(1, '?sucursal_id=999')).status, 400);
-      const branch = await request(2);
-      assert.equal(branch.status, 200);
-      assert.equal(branch.body.sucursal_id, 11);
-      assert.equal(branch.body.can_manage_inventory_catalog, false);
-      assert.equal((await request(3)).body.sucursal_id, 22);
+      assert.equal((await request(2)).status, 403);
+      assert.equal((await request(3)).status, 403);
       assert.equal((await request(1)).body.sucursal_ids, null);
       assert.equal((await request(1, '?sucursal_id=22')).body.sucursal_id, 22);
       // Role changes are effective on the very next request, independent of JWT age.

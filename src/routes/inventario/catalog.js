@@ -149,6 +149,45 @@ for (const [route, def] of Object.entries(definitions)) {
   router.put(`/${route}/:id`, asyncHandler(save));
 }
 
+router.delete('/productos/:id', asyncHandler(async (req, res) => {
+  if (!req.user.is_admin || !req.user.can_manage_inventory_catalog) {
+    fail('Solo el administrador global puede eliminar artículos.', 403);
+  }
+  const productId = validate(id, req.params.id);
+  await transaction(async db => {
+    const [products] = await db.query('SELECT * FROM inv_producto WHERE id=? FOR UPDATE', [productId]);
+    if (!products.length) fail('El artículo no existe.', 404);
+
+    const relatedChecks = [
+      ['inv_movimiento', 'producto_id'],
+      ['inv_documento_detalle', 'producto_id'],
+      ['inv_transferencia_detalle', 'producto_id'],
+      ['inv_ajuste_solicitud', 'producto_id'],
+      ['inv_orden_compra_detalle', 'producto_id'],
+      ['inv_recepcion_compra_detalle', 'producto_id'],
+      ['inv_conteo_ciclico_detalle', 'producto_id'],
+    ];
+    for (const [table, column] of relatedChecks) {
+      const [related] = await db.query(`SELECT 1 FROM ${table} WHERE ${column}=? LIMIT 1`, [productId]);
+      if (related.length) {
+        fail('No se puede eliminar el artículo porque tiene movimientos o registros operativos relacionados. Puedes desactivarlo para conservar el historial.', 409);
+      }
+    }
+
+    await db.query(`DELETE l FROM inv_notificacion_lectura l
+      JOIN inv_notificacion n ON n.id=l.notificacion_id WHERE n.producto_id=?`, [productId]);
+    await db.query('DELETE FROM inv_notificacion WHERE producto_id=?', [productId]);
+    await db.query('DELETE FROM inv_existencia WHERE producto_id=?', [productId]);
+    await db.query('DELETE FROM inv_costo_sucursal WHERE producto_id=?', [productId]);
+    await db.query('DELETE FROM inv_producto_proveedor WHERE producto_id=?', [productId]);
+    await db.query('DELETE FROM inv_producto_almacen WHERE producto_id=?', [productId]);
+    await db.query(`INSERT INTO inv_auditoria (sucursal_id,usuario_id,accion,entidad,entidad_id,antes,despues)
+      VALUES (NULL,?,'ELIMINAR','inv_producto',?,?,NULL)`, [Number(req.user.sub), productId, JSON.stringify(products[0])]);
+    await db.query('DELETE FROM inv_producto WHERE id=?', [productId]);
+  });
+  res.status(204).end();
+}));
+
 router.get('/productos/:id/limites', asyncHandler(async (req, res) => {
   const productId = validate(id, req.params.id);
   const q = validate(Joi.object({ sucursal_id: id.optional() }), req.query);

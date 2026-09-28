@@ -1,13 +1,9 @@
 // Inventory is independent of order permissions, including multi-branch agents.
 function inventoryScope(user) {
-  if (!user?.can_manage_inventory) throw Object.assign(new Error('No tienes acceso al inventario.'), { status: 403 });
-  if (user.is_admin) return null;
-  const ids = user.allowed_sucursal_ids;
-  if (!user.is_branch_admin || !Array.isArray(ids) || ids.length !== 1
-      || !Number.isSafeInteger(ids[0]) || ids[0] <= 0) {
-    throw Object.assign(new Error('El inventario requiere una sucursal válida.'), { status: 403 });
+  if (!user?.is_admin || !user?.can_manage_inventory) {
+    throw Object.assign(new Error('Solo el administrador global puede acceder al inventario.'), { status: 403 });
   }
-  return [...ids];
+  return null;
 }
 
 async function resolveInventoryScope(user, requestedId, db) {
