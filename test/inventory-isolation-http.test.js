@@ -1,0 +1,46 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+test('authenticated inventory accounts are denied on every non-inventory router', async () => {
+  // No workshop database connections: only authentication metadata is simulated.
+  const { pool } = require('../src/config/db');
+  const originalQuery = pool.query;
+  let roleId = 6;
+  const roles = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, nombre: String(i + 1) }));
+  pool.query = async sql => {
+    if (sql.includes('FROM usuario WHERE')) return [[{ id: 99, activo: 1 }]];
+    if (sql.includes('INNER JOIN rol r')) return [[roles[roleId - 1]]];
+    if (sql.includes('FROM rol ORDER BY')) return [roles];
+    if (sql.includes('FROM cat_sucursal ORDER BY')) return [[{ id: 11 }, { id: 22 }]];
+    if (sql.includes('FROM rol_sucursal')) return [[{ rol_id: 7, sucursal_id: 11 }, { rol_id: 8, sucursal_id: 22 }]];
+    throw new Error('Unexpected data access: ' + sql);
+  };
+  const express = require('express');
+  const app = express();
+  app.use(express.json());
+  app.use('/api', require('../src/routes'));
+  app.use((err, req, res, next) => res.status(err.status || 500).json({ message: err.message }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  try {
+    const { signAccessToken } = require('../src/config/jwt');
+    const headers = { Authorization: `Bearer ${signAccessToken({ sub: '99' })}` };
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    for (roleId of [6, 7, 8]) {
+      const access = await fetch(`${base}/inventario/acceso`, { headers });
+      assert.equal(access.status, 200);
+      assert.deepEqual((await access.json()).sucursal_ids, roleId === 6 ? null : [roleId === 7 ? 11 : 22]);
+      for (const route of ['dashboard', 'reports', 'cliente', 'vehiculo', 'orden_trabajo', 'orden_sucursal', 'orden_asignacion', 'empleado', 'usuario', 'usuario_rol', 'rol', 'permiso', 'rol_permiso', 'dia_festivo', 'meta_mensual', 'garantia', 'cat_sucursal', 'cat_tipo_cliente', 'cat_estatus_orden', 'cat_categoria_vehiculo', 'cat_tipo_reparacion', 'cat_tipo_material_suelto', 'cat_calidad']) {
+        for (const method of ['GET', 'POST', 'PUT', 'DELETE']) {
+          const response = await fetch(`${base}/${route}`, { method, headers });
+          assert.equal(response.status, 403, `${roleId} ${method} ${route}`);
+          await response.arrayBuffer();
+        }
+      }
+    }
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    pool.query = originalQuery;
+    await pool.end();
+  }
+});
