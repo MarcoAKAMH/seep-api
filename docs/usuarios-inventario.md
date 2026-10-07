@@ -4,11 +4,11 @@ Esta versión agrega roles exclusivos, asignables desde Usuarios por el administ
 
 | Rol | Alcance | Catálogo compartido |
 | --- | --- | --- |
-| Inventario - todas las sucursales (6) | Todas | Puede crear y editar artículos, fotos, categorías, unidades y proveedores |
-| Inventario - Alameda (7) | Sucursal asociada al agente Alameda | Consulta |
-| Inventario - Chapala (8) | Sucursal asociada al agente Chapala | Consulta |
+| Inventario - todas las sucursales (6) | Todas | Solo consulta de artículos y precios |
+| Inventario - Alameda (7) | Sucursal asociada al agente Alameda | Solo consulta de artículos y precios |
+| Inventario - Chapala (8) | Sucursal asociada al agente Chapala | Solo consulta de artículos y precios |
 
-Pueden operar existencias, compras, conteos y reportes de inventario en su alcance. Las autorizaciones de ajustes, reversas, cancelaciones de conteos y compras siguen reservadas al administrador global, al igual que el inventario inicial y la eliminación de artículos.
+Los tres roles ven exclusivamente el catálogo: fotografías, SKU, nombres, categoría, unidad, tipo, estado, precio público y precio de mayoreo. Pueden buscar, filtrar y cambiar de página. No pueden crear, editar, eliminar, ajustar límites, cargar fotos ni acceder a existencias, movimientos, compras, proveedores, conteos, alertas, costos o reportes. La API solo permite GET de acceso, metadatos de catálogo, productos y fotografías. Los metadatos no incluyen almacenes ni ubicaciones y los productos se entregan con una lista explícita de campos de consulta.
 
 No pueden entrar al dashboard del taller, clientes, OT, técnicos, reportes generales, días festivos ni administración de usuarios. La API rechaza estas rutas con 403. Los roles de inventario no se combinan entre sí ni con otros roles. Un cambio de rol se comprueba en cada petición autenticada.
 
@@ -18,7 +18,7 @@ No pueden entrar al dashboard del taller, clientes, OT, técnicos, reportes gene
 2. Revisar `node scripts/migrate-inventory-users.js --check` contra la base de pruebas.
 3. Ejecutar `node scripts/migrate-inventory-users.js --apply`. Es idempotente y cancela si los IDs ya pertenecen a otros roles. No crea cuentas ni contraseñas.
 4. Como administrador global, abrir Usuarios, crear o editar la cuenta y seleccionar una sola opción de inventario. Capturar el correo y contraseña habituales.
-5. Iniciar sesión con esa cuenta. Debe abrir Inventario a todo el ancho, sin panel lateral, con cuenta y cierre de sesión disponibles.
+5. Iniciar sesión con esa cuenta. Debe abrir directamente el catálogo de consulta a todo el ancho, sin panel lateral, con cuenta y cierre de sesión disponibles.
 
 No se debe ejecutar la migración sobre producción hasta liberar esta versión. Las cuentas actuales mantienen sus roles y permisos.
 

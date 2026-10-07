@@ -21,7 +21,7 @@ async function migrateInventoryUsers(db, apply = false) {
       if (mappings.some(row => Number(row.rol_id) === role.id && Number(row.sucursal_id) !== role.sucursal_id)) throw new Error(`El rol ${role.id} tiene otra sucursal.`);
       if (apply) {
         if (!roles.some(row => Number(row.id) === role.id)) await db.query('INSERT INTO rol(id,nombre,descripcion) VALUES (?,?,?)',
-          [role.id, role.nombre, 'Acceso exclusivo al inventario. Sin acceso al taller ni a usuarios. Las autorizaciones requieren administrador global.']);
+          [role.id, role.nombre, 'Solo consulta del catalogo, fotografias y precios publico y mayoreo. Sin movimientos ni administracion.']);
         if (role.sucursal_id && !mappings.some(row => Number(row.rol_id) === role.id)) await db.query('INSERT INTO rol_sucursal(rol_id,sucursal_id) VALUES (?,?)', [role.id, role.sucursal_id]);
       }
     }

@@ -28,7 +28,7 @@ test('inventory branch scope rejects another branch and shared catalog writes', 
   assert.equal(inventoryScope(profile(6)), null);
   assert.deepEqual(inventoryScope(profile(7)), [11]);
   assert.deepEqual(inventoryScope(profile(8)), [22]);
-  assert.equal(profile(6).can_manage_inventory_catalog, true);
+  assert.equal(profile(6).can_manage_inventory_catalog, false);
   assert.equal(profile(7).can_manage_inventory_catalog, false);
   await assert.rejects(resolveInventoryScope(profile(7), 22, { query() { assert.fail('Query outside scope'); } }), { status: 403 });
 });

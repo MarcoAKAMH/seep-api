@@ -51,7 +51,7 @@ function buildAccessProfile(roles, sucursales, mappings) {
     can_view_reports: isAdmin || Boolean(scope),
     can_manage_users: isAdmin || Boolean(scope),
     can_manage_inventory: isAdmin || inventoryGlobal || inventoryBranch,
-    can_manage_inventory_catalog: isAdmin || inventoryGlobal,
+    can_manage_inventory_catalog: isAdmin,
     can_authorize_inventory_adjustments: isAdmin,
     allowed_sucursal_ids: allowed,
     can_view_all_orders: isAdmin || (!inventoryOnly && !hasGlobal && !hasBranchAdmin && existing.length > 0 && allowed.length === existing.length),

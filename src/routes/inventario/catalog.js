@@ -64,6 +64,7 @@ router.get('/catalogos', asyncHandler(async (req, res) => {
   const [categorias] = await pool.query('SELECT * FROM inv_categoria ORDER BY nombre');
   const [unidades] = await pool.query('SELECT * FROM inv_unidad ORDER BY nombre');
   const [sucursales] = await pool.query(`SELECT i.id, i.nombre FROM (SELECT id, nombre, id AS sucursal_id FROM cat_sucursal) i WHERE ${filter.sql} ORDER BY nombre`, filter.params);
+  if (req.user.is_inventory_only) return res.json({ categorias, unidades, sucursales, almacenes: [], ubicaciones: [] });
   const [almacenes] = await pool.query(`SELECT i.* FROM inv_almacen i WHERE ${filter.sql} ORDER BY nombre`, filter.params);
   const [ubicaciones] = await pool.query(`SELECT i.* FROM inv_ubicacion i WHERE ${filter.sql} ORDER BY codigo`, filter.params);
   res.json({ categorias, unidades, sucursales, almacenes, ubicaciones });
@@ -88,7 +89,8 @@ for (const [route, def] of Object.entries(definitions)) {
     }
     const where = conditions.join(' AND ');
     const [[count]] = await pool.query(`SELECT COUNT(*) total FROM ${def.table} i WHERE ${where}`, params);
-    const [items] = await pool.query(`SELECT i.* FROM ${def.table} i WHERE ${where} ORDER BY i.id DESC LIMIT :limit OFFSET :offset`, params);
+    const projection = req.user.is_inventory_only ? 'i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo' : 'i.*';
+    const [items] = await pool.query(`SELECT ${projection} FROM ${def.table} i WHERE ${where} ORDER BY i.id DESC LIMIT :limit OFFSET :offset`, params);
     res.json({ items, total: Number(count.total), limit: q.limit, offset: q.offset });
   }));
 

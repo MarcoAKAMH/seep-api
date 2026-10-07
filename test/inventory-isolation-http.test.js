@@ -13,6 +13,14 @@ test('authenticated inventory accounts are denied on every non-inventory router'
     if (sql.includes('FROM rol ORDER BY')) return [roles];
     if (sql.includes('FROM cat_sucursal ORDER BY')) return [[{ id: 11 }, { id: 22 }]];
     if (sql.includes('FROM rol_sucursal')) return [[{ rol_id: 7, sucursal_id: 11 }, { rol_id: 8, sucursal_id: 22 }]];
+    if (sql.includes('FROM inv_categoria')) return [[{ id: 1, nombre: 'Escape' }]];
+    if (sql.includes('FROM inv_unidad')) return [[{ id: 1, nombre: 'Pieza' }]];
+    if (sql.includes('FROM (SELECT id, nombre, id AS sucursal_id FROM cat_sucursal)')) return [[{ id: 11, nombre: 'Alameda' }]];
+    if (sql.startsWith('SELECT COUNT(*) total FROM inv_producto')) return [[{ total: 1 }]];
+    if (sql.includes('FROM inv_producto i')) {
+      assert.ok(sql.startsWith('SELECT i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo FROM'));
+      return [[{ id: 1, sku: 'TEST', nombre_comercial: 'Tubo', precio_publico: '200', precio_mayoreo: '150' }]];
+    }
     throw new Error('Unexpected data access: ' + sql);
   };
   const express = require('express');
@@ -30,6 +38,24 @@ test('authenticated inventory accounts are denied on every non-inventory router'
       const access = await fetch(`${base}/inventario/acceso`, { headers });
       assert.equal(access.status, 200);
       assert.deepEqual((await access.json()).sucursal_ids, roleId === 6 ? null : [roleId === 7 ? 11 : 22]);
+      const products = await fetch(`${base}/inventario/productos`, { headers });
+      assert.equal(products.status, 200);
+      const catalog = await products.json();
+      assert.equal(catalog.items[0].precio_publico, '200');
+      assert.equal(catalog.items[0].precio_mayoreo, '150');
+      const metadata = await fetch(`${base}/inventario/catalogos`, { headers });
+      assert.equal(metadata.status, 200);
+      const lists = await metadata.json();
+      assert.deepEqual(lists.almacenes, []);
+      assert.deepEqual(lists.ubicaciones, []);
+      for (const route of ['productos', 'catalogos', 'productos/1', 'productos/1/limites', 'fotos', 'movimientos', 'existencias', 'kardex', 'tablero', 'almacenes', 'ubicaciones', 'proveedores', 'alertas', 'compras/ordenes', 'conteos', 'transferencias', 'ajustes', 'reportes/rotacion']) {
+        for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+          if (method === 'GET' && ['productos', 'catalogos'].includes(route)) continue;
+          const response = await fetch(`${base}/inventario/${route}`, { method, headers });
+          assert.equal(response.status, 403, `${roleId} ${method} inventory/${route}`);
+          await response.arrayBuffer();
+        }
+      }
       for (const route of ['dashboard', 'reports', 'cliente', 'vehiculo', 'orden_trabajo', 'orden_sucursal', 'orden_asignacion', 'empleado', 'usuario', 'usuario_rol', 'rol', 'permiso', 'rol_permiso', 'dia_festivo', 'meta_mensual', 'garantia', 'cat_sucursal', 'cat_tipo_cliente', 'cat_estatus_orden', 'cat_categoria_vehiculo', 'cat_tipo_reparacion', 'cat_tipo_material_suelto', 'cat_calidad']) {
         for (const method of ['GET', 'POST', 'PUT', 'DELETE']) {
           const response = await fetch(`${base}/${route}`, { method, headers });
