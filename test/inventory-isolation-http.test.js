@@ -7,7 +7,13 @@ test('authenticated inventory accounts are denied on every non-inventory router'
   const originalQuery = pool.query;
   let roleId = 6;
   const roles = Array.from({ length: 8 }, (_, i) => ({ id: i + 1, nombre: String(i + 1) }));
-  pool.query = async sql => {
+  pool.query = async (sql, params) => {
+    if (sql.includes('FROM inv_existencia i')) {
+      assert.ok(!sql.includes('costo') && !sql.includes('valor') && !sql.includes('i.*'));
+      if (roleId !== 6) assert.ok(Object.values(params).includes(roleId === 7 ? 11 : 22));
+      if (sql.startsWith('SELECT COUNT')) return [[{ total: 1 }]];
+      return [[{ producto_id: 1, sucursal_id: roleId === 8 ? 22 : 11, cantidad: '1.5', unidad_id: 1 }]];
+    }
     if (sql.includes('FROM usuario WHERE')) return [[{ id: 99, activo: 1 }]];
     if (sql.includes('INNER JOIN rol r')) return [[roles[roleId - 1]]];
     if (sql.includes('FROM rol ORDER BY')) return [roles];
@@ -48,9 +54,20 @@ test('authenticated inventory accounts are denied on every non-inventory router'
       const lists = await metadata.json();
       assert.deepEqual(lists.almacenes, []);
       assert.deepEqual(lists.ubicaciones, []);
+      const stock = await fetch(`${base}/inventario/existencias`, { headers });
+      assert.equal(stock.status, 200);
+      const stockData = await stock.json();
+      assert.equal(stockData.items[0].cantidad, '1.5');
+      assert.equal('costo_promedio' in stockData.items[0], false);
+      assert.equal('valor' in stockData.items[0], false);
+      if (roleId !== 6) {
+        const denied = await fetch(`${base}/inventario/existencias?sucursal_id=${roleId === 7 ? 22 : 11}`, { headers });
+        assert.equal(denied.status, 403);
+        await denied.arrayBuffer();
+      }
       for (const route of ['productos', 'catalogos', 'productos/1', 'productos/1/limites', 'fotos', 'movimientos', 'existencias', 'kardex', 'tablero', 'almacenes', 'ubicaciones', 'proveedores', 'alertas', 'compras/ordenes', 'conteos', 'transferencias', 'ajustes', 'reportes/rotacion']) {
         for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
-          if (method === 'GET' && ['productos', 'catalogos'].includes(route)) continue;
+          if (method === 'GET' && ['productos', 'catalogos', 'existencias'].includes(route)) continue;
           const response = await fetch(`${base}/inventario/${route}`, { method, headers });
           assert.equal(response.status, 403, `${roleId} ${method} inventory/${route}`);
           await response.arrayBuffer();
