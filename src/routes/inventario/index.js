@@ -5,6 +5,14 @@ const asyncHandler = require('../../utils/asyncHandler');
 const { inventoryOnly, resolveInventoryScope } = require('../../utils/inventoryAccess');
 
 router.use(required, inventoryOnly);
+// Inventory accounts may only consult product information, photographs and stock quantities.
+router.use((req, res, next) => {
+  if (!req.user.is_inventory_only) return next();
+  const readable = ['/acceso', '/catalogos', '/productos', '/existencias'].includes(req.path)
+    || /^\/fotos\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(req.path);
+  if (req.method === 'GET' && readable) return next();
+  return res.status(403).json({ message: 'Este usuario solo puede consultar el catálogo, sus precios y las existencias.' });
+});
 // Foundation endpoint; no stock mutation endpoints exist until the movement engine is ready.
 router.get('/acceso', asyncHandler(async (req, res) => {
   const scope = await resolveInventoryScope(req.user, req.query.sucursal_id, pool);

@@ -257,6 +257,7 @@ test('inventory migration, constraints and authenticated HTTP access', { skip: p
       const stock = await catalogRequest(2, '/existencias?q=TUB-TEST');
       assert.equal(stock.status, 200);
       assert.equal(stock.body.items[0].cantidad, '1.750001');
+      assert.equal(stock.body.items[0].precio_mayoreo, '0.000000');
       const kardex = await catalogRequest(2, '/kardex?q=FAC-1');
       assert.equal(kardex.body.total, 1);
       assert.equal(kardex.body.items[0].folio, first.body.folio);
@@ -354,10 +355,34 @@ test('inventory migration, constraints and authenticated HTTP access', { skip: p
       const proposals = await catalogRequest(2, '/compras/propuestas');
       assert.equal(proposals.status, 200, JSON.stringify(proposals.body));
       assert.equal(proposals.body.items[0].proveedor_id, provider.body.id);
+      const secondProduct = await catalogRequest(1, '/productos', 'POST', {
+        sku: 'BOMBA-TEST', nombre_comercial: 'Bomba de prueba', nombre_tecnico: 'Bomba de integración',
+        categoria_id: 1, unidad_id: 1, tipo: 'CONSUMIBLE', precio_publico: '0', precio_mayoreo: '0',
+      });
+      assert.equal(secondProduct.status, 201, JSON.stringify(secondProduct.body));
+      await pool.query('INSERT INTO inv_producto_almacen(producto_id,almacen_id,sucursal_id) VALUES (?,1,11)', [secondProduct.body.id]);
+      const multiLineBody = { sucursal_id: 11, almacen_id: 1, proveedor_id: provider.body.id,
+        detalles: [
+          { producto_id: 1, cantidad: '0.100000', costo_esperado: '20.000000' },
+          { producto_id: secondProduct.body.id, cantidad: '2.000000', costo_esperado: '5.000000' },
+        ] };
+      const duplicateLines = await catalogRequest(2, '/compras/ordenes', 'POST', {
+        ...multiLineBody, detalles: [multiLineBody.detalles[0], multiLineBody.detalles[0]],
+      });
+      assert.equal(duplicateLines.status, 400);
+      const multiLineOrder = await catalogRequest(2, '/compras/ordenes', 'POST', multiLineBody);
+      assert.equal(multiLineOrder.status, 201, JSON.stringify(multiLineOrder.body));
+      assert.equal(multiLineOrder.body.folio, `OC-${multiLineOrder.body.id}`);
+      assert.equal(multiLineOrder.body.subtotal_estimado, '12.000000');
+      const listedOrders = await catalogRequest(2, '/compras/ordenes');
+      const listedMultiLineOrder = listedOrders.body.items.find(row => Number(row.id) === multiLineOrder.body.id);
+      assert.equal(listedMultiLineOrder.detalles.length, 2);
+      assert.deepEqual(listedMultiLineOrder.detalles.map(line => Number(line.producto_id)), [1, Number(secondProduct.body.id)]);
       const orderBody = { sucursal_id: 11, almacen_id: 1, proveedor_id: provider.body.id, condiciones_pago: '30 días', notas: 'Compra de prueba',
         detalles: [{ producto_id: 1, cantidad: '0.400000', costo_esperado: '20.000000' }] };
       const order = await catalogRequest(2, '/compras/ordenes', 'POST', orderBody);
       assert.equal(order.status, 201, JSON.stringify(order.body));
+      assert.equal(order.body.folio, `OC-${order.body.id}`);
       assert.equal(order.body.estado, 'BORRADOR');
       assert.equal((await catalogRequest(2, `/compras/ordenes/${order.body.id}/acciones/solicitar`, 'POST', {})).body.estado, 'PENDIENTE_AUTORIZACION');
       assert.equal((await catalogRequest(2, `/compras/ordenes/${order.body.id}/acciones/autorizar`, 'POST', { password: testPassword, motivo: 'Intento' })).status, 403);

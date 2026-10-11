@@ -16,6 +16,7 @@ const definitions = {
     tipo: Joi.string().valid('MATERIA_PRIMA', 'PRODUCTO_TERMINADO', 'CONSUMIBLE').required(),
     foto_url: Joi.alternatives().try(Joi.string().uri({ scheme: ['https'] }).max(1024), Joi.string().pattern(/^\/inventario\/fotos\/[0-9a-f-]{36}\.(jpg|png|webp)$/)).allow('', null).empty('').default(null),
     precio_publico: decimal, precio_mayoreo: decimal, activo: active,
+    proveedor_id: id.optional(),
   }) },
   categorias: { table: 'inv_categoria', global: true, search: ['nombre'], schema: Joi.object({ nombre: text(120), activo: active }) },
   unidades: { table: 'inv_unidad', global: true, search: ['nombre', 'clave'], schema: Joi.object({ nombre: text(80), clave: text(20), decimales: Joi.number().integer().min(0).max(6).required() }) },
@@ -64,6 +65,7 @@ router.get('/catalogos', asyncHandler(async (req, res) => {
   const [categorias] = await pool.query('SELECT * FROM inv_categoria ORDER BY nombre');
   const [unidades] = await pool.query('SELECT * FROM inv_unidad ORDER BY nombre');
   const [sucursales] = await pool.query(`SELECT i.id, i.nombre FROM (SELECT id, nombre, id AS sucursal_id FROM cat_sucursal) i WHERE ${filter.sql} ORDER BY nombre`, filter.params);
+  if (req.user.is_inventory_only) return res.json({ categorias, unidades, sucursales, almacenes: [], ubicaciones: [] });
   const [almacenes] = await pool.query(`SELECT i.* FROM inv_almacen i WHERE ${filter.sql} ORDER BY nombre`, filter.params);
   const [ubicaciones] = await pool.query(`SELECT i.* FROM inv_ubicacion i WHERE ${filter.sql} ORDER BY codigo`, filter.params);
   res.json({ categorias, unidades, sucursales, almacenes, ubicaciones });
@@ -88,7 +90,21 @@ for (const [route, def] of Object.entries(definitions)) {
     }
     const where = conditions.join(' AND ');
     const [[count]] = await pool.query(`SELECT COUNT(*) total FROM ${def.table} i WHERE ${where}`, params);
-    const [items] = await pool.query(`SELECT i.* FROM ${def.table} i WHERE ${where} ORDER BY i.id DESC LIMIT :limit OFFSET :offset`, params);
+    const projection = req.user.is_inventory_only ? 'i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo' : 'i.*';
+    const [items] = await pool.query(`SELECT ${projection} FROM ${def.table} i WHERE ${where} ORDER BY i.id DESC LIMIT :limit OFFSET :offset`, params);
+    if (route === 'productos' && !req.user.is_inventory_only && items.length) {
+      const supplierScope = inventoryScopeSql(scope.sucursalIds);
+      const [suppliers] = await pool.query(`SELECT i.producto_id,
+        IF(COUNT(DISTINCT i.proveedor_id)=1,MIN(i.proveedor_id),NULL) proveedor_id,
+        IF(COUNT(DISTINCT i.proveedor_id)=1,MIN(p.nombre_comercial),NULL) proveedor_nombre,
+        MIN(p.activo) proveedor_activo, COUNT(DISTINCT i.proveedor_id) proveedores_asignados
+        FROM inv_producto_proveedor i JOIN inv_proveedor p ON p.id=i.proveedor_id
+        JOIN inv_proveedor_sucursal ps ON ps.proveedor_id=i.proveedor_id AND ps.sucursal_id=i.sucursal_id
+        WHERE i.preferido=1 AND i.producto_id IN (:products) AND ${supplierScope.sql}
+        GROUP BY i.producto_id`, { ...supplierScope.params, products: items.map(item => item.id) });
+      for (const item of items) Object.assign(item, suppliers.find(row => Number(row.producto_id) === Number(item.id)) ||
+        { proveedor_id: null, proveedor_nombre: null, proveedor_activo: null, proveedores_asignados: 0 });
+    }
     res.json({ items, total: Number(count.total), limit: q.limit, offset: q.offset });
   }));
 
@@ -132,6 +148,7 @@ for (const [route, def] of Object.entries(definitions)) {
         if (stock.length) fail('No se puede desactivar un registro con existencias. Primero registra su salida o transferencia.', 409);
       }
       const data = { ...body };
+      if (route === 'productos') delete data.proveedor_id;
       if (!recordId && route === 'productos') data.creado_por = Number(req.user.sub);
       const fields = Object.keys(data); // Only schema-validated fields, never client identifiers.
       let savedId = recordId;
@@ -139,6 +156,19 @@ for (const [route, def] of Object.entries(definitions)) {
       else {
         const [insert] = await db.query(`INSERT INTO ${def.table} (${fields.join(',')}) VALUES (${fields.map(() => '?').join(',')})`, Object.values(data));
         savedId = insert.insertId;
+      }
+      if (route === 'productos' && body.proveedor_id !== undefined) {
+        await requireActive(db, 'inv_proveedor', body.proveedor_id);
+        const [branches] = await db.query('SELECT sucursal_id FROM inv_proveedor_sucursal WHERE proveedor_id=? FOR UPDATE', [body.proveedor_id]);
+        if (!branches.length) fail('El proveedor no tiene sucursales asignadas.');
+        const [previous] = await db.query('SELECT * FROM inv_producto_proveedor WHERE producto_id=? AND preferido=1 FOR UPDATE', [savedId]);
+        await db.query('UPDATE inv_producto_proveedor SET preferido=0 WHERE producto_id=?', [savedId]);
+        for (const branch of branches) {
+          await db.query(`INSERT INTO inv_producto_proveedor(producto_id,proveedor_id,sucursal_id,preferido)
+            VALUES (?,?,?,1) ON DUPLICATE KEY UPDATE preferido=1`, [savedId, body.proveedor_id, branch.sucursal_id]);
+        }
+        await audit(db, req, 'inv_producto_proveedor', savedId, previous.length ? previous : null,
+          { producto_id: savedId, proveedor_id: body.proveedor_id, sucursal_ids: branches.map(branch => branch.sucursal_id) });
       }
       await audit(db, req, def.table, savedId, before, data, body.sucursal_id);
       return { id: savedId, ...body };

@@ -13,6 +13,7 @@ function canViewAllOrders(user) {
 
 // null means unrestricted; an empty array deliberately means no access.
 function getOrderScope(user) {
+  if (user?.is_inventory_only) throw accessError('Este usuario solo puede acceder al inventario.');
   if (user?.is_admin) return null;
   const ids = getAllowedSucursalIds(user);
   if (user?.is_branch_admin) {

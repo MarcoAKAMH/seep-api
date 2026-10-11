@@ -37,7 +37,15 @@ router.get('/existencias', asyncHandler(async (req, res) => {
   if (query.q) { params.search = `%${query.q.replace(/[!%_]/g, c => `!${c}`)}%`; conditions.push("(p.sku LIKE :search ESCAPE '!' OR p.nombre_comercial LIKE :search ESCAPE '!' OR u.codigo LIKE :search ESCAPE '!')"); }
   const where = conditions.join(' AND ');
   const [[count]] = await pool.query(`SELECT COUNT(*) total FROM inv_existencia i JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id WHERE ${where}`, params);
-  const [items] = await pool.query(`SELECT i.*,p.sku,p.nombre_comercial,p.unidad_id,u.codigo ubicacion_codigo,a.nombre almacen_nombre,
+  if (req.user.is_inventory_only) {
+    const [items] = await pool.query(`SELECT i.producto_id,i.sucursal_id,i.almacen_id,i.ubicacion_id,i.cantidad,
+      p.sku,p.nombre_comercial,p.unidad_id,u.codigo ubicacion_codigo,a.nombre almacen_nombre
+      FROM inv_existencia i JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id
+      JOIN inv_almacen a ON a.id=i.almacen_id
+      WHERE ${where} ORDER BY p.nombre_comercial,i.sucursal_id,i.almacen_id,i.ubicacion_id,i.producto_id LIMIT :limit OFFSET :offset`, params);
+    return res.json({ items, total: Number(count.total), limit: query.limit, offset: query.offset });
+  }
+  const [items] = await pool.query(`SELECT i.*,p.sku,p.nombre_comercial,p.unidad_id,p.precio_mayoreo,u.codigo ubicacion_codigo,a.nombre almacen_nombre,
       COALESCE(c.costo_promedio,0) costo_promedio,(i.cantidad*COALESCE(c.costo_promedio,0)) valor
     FROM inv_existencia i JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id
     JOIN inv_almacen a ON a.id=i.almacen_id LEFT JOIN inv_costo_sucursal c ON c.producto_id=i.producto_id AND c.sucursal_id=i.sucursal_id

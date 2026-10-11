@@ -31,6 +31,7 @@ const router = express.Router();
 
 router.use('/auth', authRoutes);
 router.use('/inventario', require('./inventario'));
+router.use(require('../middleware/auth').required, require('../middleware/inventoryIsolation'));
 
 // Tables
 router.use('/cat_tipo_cliente', cat_tipo_cliente);

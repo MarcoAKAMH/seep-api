@@ -1,4 +1,4 @@
-const { ROLE_IDS, BRANCH_ADMIN_AGENT_ROLES } = require('../config/roles');
+const { ROLE_IDS, BRANCH_ADMIN_AGENT_ROLES, INVENTORY_ROLE_IDS } = require('../config/roles');
 
 const uniqueIds = (values) => [...new Set(values.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))];
 
@@ -24,15 +24,21 @@ function branchScope(roleIds, sucursales, mappings) {
 
 function buildAccessProfile(roles, sucursales, mappings) {
   const roleIds = uniqueIds(roles.map((role) => role.id));
+  const inventoryOnly = roleIds.some(id => INVENTORY_ROLE_IDS.includes(id));
+  const inventoryGlobal = roleIds.length === 1 && roleIds[0] === ROLE_IDS.INVENTARIO_GLOBAL;
+  const inventoryBranches = uniqueIds(mappings.filter(row => Number(row.rol_id) === roleIds[0]).map(row => row.sucursal_id));
+  const inventoryBranch = inventoryOnly && !inventoryGlobal && roleIds.length === 1 && inventoryBranches.length === 1
+    && sucursales.some(row => Number(row.id) === inventoryBranches[0]);
   const hasGlobal = roleIds.includes(ROLE_IDS.ADMINISTRADOR);
   const hasBranchAdmin = branchRoleIds(roleIds).length > 0;
   const isAdmin = hasGlobal && roleIds.length === 1;
   const scope = !hasGlobal && hasBranchAdmin ? branchScope(roleIds, sucursales, mappings) : null;
   const existing = uniqueIds(sucursales.map((row) => row.id));
   let allowed = [];
-  if (isAdmin) allowed = existing;
+  if (isAdmin || inventoryGlobal) allowed = existing;
+  else if (inventoryBranch) allowed = inventoryBranches;
   else if (scope) allowed = [scope.sucursalId];
-  else if (!hasGlobal && !hasBranchAdmin) {
+  else if (!hasGlobal && !hasBranchAdmin && !inventoryOnly) {
     allowed = uniqueIds(mappings.filter((row) => roleIds.includes(Number(row.rol_id))).map((row) => row.sucursal_id))
       .filter((id) => existing.includes(id));
   }
@@ -40,13 +46,15 @@ function buildAccessProfile(roles, sucursales, mappings) {
     roles,
     is_admin: isAdmin,
     is_branch_admin: Boolean(scope),
+    is_inventory_only: inventoryOnly,
+    can_select_inventory_branch: isAdmin || inventoryGlobal,
     can_view_reports: isAdmin || Boolean(scope),
     can_manage_users: isAdmin || Boolean(scope),
-    can_manage_inventory: isAdmin,
+    can_manage_inventory: isAdmin || inventoryGlobal || inventoryBranch,
     can_manage_inventory_catalog: isAdmin,
     can_authorize_inventory_adjustments: isAdmin,
     allowed_sucursal_ids: allowed,
-    can_view_all_orders: isAdmin || (!hasGlobal && !hasBranchAdmin && existing.length > 0 && allowed.length === existing.length),
+    can_view_all_orders: isAdmin || (!inventoryOnly && !hasGlobal && !hasBranchAdmin && existing.length > 0 && allowed.length === existing.length),
   };
 }
 
@@ -71,6 +79,12 @@ function validateRoleCombination(roleIds, roles, sucursales, mappings, { allowEm
     reject('Selecciona al menos un rol.');
   }
   if (ids.some((id) => !roles.some((role) => Number(role.id) === id))) reject('Uno o más roles seleccionados no existen.');
+  if (ids.some(id => INVENTORY_ROLE_IDS.includes(id))) {
+    if (ids.length !== 1) reject('El usuario exclusivo de inventario no se puede combinar con otros roles.');
+    if (!buildAccessProfile(roles.filter(role => ids.includes(Number(role.id))), sucursales, mappings).can_manage_inventory) {
+      reject('El rol de inventario necesita una sucursal válida.');
+    }
+  }
   if (ids.includes(ROLE_IDS.ADMINISTRADOR) && ids.length !== 1) reject('El administrador global no se puede combinar con otros roles.');
   if (branchRoleIds(ids).length && !branchScope(ids, sucursales, mappings)) {
     reject('El administrador de sucursal solo puede tener roles de su misma sucursal y requiere una sucursal válida.');
