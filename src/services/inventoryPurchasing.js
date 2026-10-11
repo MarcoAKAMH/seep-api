@@ -20,6 +20,11 @@ async function validateOrderReferences(db, input) {
     const [product] = await db.query(`SELECT p.id FROM inv_producto p JOIN inv_producto_almacen pa ON pa.producto_id=p.id
       WHERE p.id=? AND pa.almacen_id=? AND pa.sucursal_id=? AND p.activo=1 FOR UPDATE`, [line.producto_id,input.almacen_id,input.sucursal_id]);
     if (!product.length) fail(`Partida ${index + 1}: el artículo no está configurado en el almacén.`);
+    const [assigned] = await db.query(`SELECT proveedor_id FROM inv_producto_proveedor
+      WHERE producto_id=? AND sucursal_id=? AND preferido=1 FOR UPDATE`, [line.producto_id,input.sucursal_id]);
+    if (assigned.some(row => Number(row.proveedor_id) !== Number(input.proveedor_id))) {
+      fail(`Partida ${index + 1}: el proveedor no coincide con el asignado al artículo. Crea una orden por proveedor.`);
+    }
     subtotal += toUnits(line.cantidad) * toUnits(line.costo_esperado) / 1000000n;
   }
   return fromUnits(subtotal);
@@ -42,10 +47,12 @@ async function saveDraftOrder(input, userId, orderId = null) {
         [input.almacen_id,input.proveedor_id,input.fecha_estimada || null,input.condiciones_pago || null,input.notas || null,subtotal,orderId]);
       await db.query('DELETE FROM inv_orden_compra_detalle WHERE orden_compra_id=?', [orderId]);
     } else {
-      orderFolio = folio('OC');
+      orderFolio = `OC-PENDING-${crypto.randomBytes(16).toString('hex')}`;
       const [created] = await db.query(`INSERT INTO inv_orden_compra(folio,sucursal_id,almacen_id,proveedor_id,fecha_estimada,condiciones_pago,notas,subtotal_estimado,creado_por)
         VALUES (?,?,?,?,?,?,?,?,?)`, [orderFolio,input.sucursal_id,input.almacen_id,input.proveedor_id,input.fecha_estimada || null,input.condiciones_pago || null,input.notas || null,subtotal,userId]);
       id = Number(created.insertId);
+      orderFolio = `OC-${created.insertId}`;
+      await db.query('UPDATE inv_orden_compra SET folio=? WHERE id=?', [orderFolio,id]);
     }
     await db.query('INSERT INTO inv_orden_compra_detalle(orden_compra_id,producto_id,cantidad_ordenada,costo_esperado) VALUES ?',
       [input.detalles.map(line => [id,line.producto_id,line.cantidad,line.costo_esperado])]);

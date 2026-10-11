@@ -60,8 +60,10 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.LIGHTSAIL_PORT }}" \
             ${{ secrets.LIGHTSAIL_USER }}@${{ secrets.LIGHTSAIL_HOST }} << 'EOF'
+              set -e
               cd /home/ubuntu/seep-api
               npm ci --omit=dev
+              node scripts/migrate-inventory-users.js --apply
               sudo systemctl restart seep-api
               sudo systemctl status seep-api --no-pager
           EOF

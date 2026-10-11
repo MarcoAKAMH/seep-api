@@ -45,7 +45,7 @@ router.get('/existencias', asyncHandler(async (req, res) => {
       WHERE ${where} ORDER BY p.nombre_comercial,i.sucursal_id,i.almacen_id,i.ubicacion_id,i.producto_id LIMIT :limit OFFSET :offset`, params);
     return res.json({ items, total: Number(count.total), limit: query.limit, offset: query.offset });
   }
-  const [items] = await pool.query(`SELECT i.*,p.sku,p.nombre_comercial,p.unidad_id,u.codigo ubicacion_codigo,a.nombre almacen_nombre,
+  const [items] = await pool.query(`SELECT i.*,p.sku,p.nombre_comercial,p.unidad_id,p.precio_mayoreo,u.codigo ubicacion_codigo,a.nombre almacen_nombre,
       COALESCE(c.costo_promedio,0) costo_promedio,(i.cantidad*COALESCE(c.costo_promedio,0)) valor
     FROM inv_existencia i JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id
     JOIN inv_almacen a ON a.id=i.almacen_id LEFT JOIN inv_costo_sucursal c ON c.producto_id=i.producto_id AND c.sucursal_id=i.sucursal_id
