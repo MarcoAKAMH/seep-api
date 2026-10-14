@@ -37,7 +37,7 @@ router.get('/existencias', asyncHandler(async (req, res) => {
   if (query.q) { params.search = `%${query.q.replace(/[!%_]/g, c => `!${c}`)}%`; conditions.push("(p.sku LIKE :search ESCAPE '!' OR p.nombre_comercial LIKE :search ESCAPE '!' OR u.codigo LIKE :search ESCAPE '!')"); }
   const where = conditions.join(' AND ');
   const [[count]] = await pool.query(`SELECT COUNT(*) total FROM inv_existencia i JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id WHERE ${where}`, params);
-  if (req.user.is_inventory_only) {
+  if (req.user.is_inventory_only && !req.user.is_inventory_admin) {
     const [items] = await pool.query(`SELECT i.producto_id,i.sucursal_id,i.almacen_id,i.ubicacion_id,i.cantidad,
       p.sku,p.nombre_comercial,p.unidad_id,u.codigo ubicacion_codigo,a.nombre almacen_nombre
       FROM inv_existencia i JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id
@@ -75,7 +75,7 @@ router.get('/kardex', asyncHandler(async (req, res) => {
 router.post('/movimientos', asyncHandler(async (req, res) => {
   const body = validate(documentSchema, req.body);
   await resolveInventoryScope(req.user, body.sucursal_id, pool);
-  if (body.tipo === 'INICIAL' && !req.user.is_admin) throw Object.assign(new Error('Solo el administrador global puede registrar inventario inicial.'), { status: 403 });
+  if (body.tipo === 'INICIAL' && (!req.user.is_admin && !req.user.is_inventory_admin)) throw Object.assign(new Error('Solo el administrador global o de inventario puede registrar inventario inicial.'), { status: 403 });
   const result = await applyDocument(body, Number(req.user.sub));
   res.status(result.duplicated ? 200 : 201).json(result);
 }));

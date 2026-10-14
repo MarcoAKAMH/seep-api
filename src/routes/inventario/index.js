@@ -5,9 +5,9 @@ const asyncHandler = require('../../utils/asyncHandler');
 const { inventoryOnly, resolveInventoryScope } = require('../../utils/inventoryAccess');
 
 router.use(required, inventoryOnly);
-// Inventory accounts may only consult product information, photographs and stock quantities.
+// Read-only inventory accounts may only consult product information, photographs and stock quantities.
 router.use((req, res, next) => {
-  if (!req.user.is_inventory_only) return next();
+  if (!req.user.is_inventory_only || req.user.is_inventory_admin) return next();
   const readable = ['/acceso', '/catalogos', '/productos', '/existencias'].includes(req.path)
     || /^\/fotos\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(req.path);
   if (req.method === 'GET' && readable) return next();

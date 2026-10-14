@@ -25,9 +25,10 @@ function branchScope(roleIds, sucursales, mappings) {
 function buildAccessProfile(roles, sucursales, mappings) {
   const roleIds = uniqueIds(roles.map((role) => role.id));
   const inventoryOnly = roleIds.some(id => INVENTORY_ROLE_IDS.includes(id));
+  const inventoryAdmin = roleIds.length === 1 && roleIds[0] === ROLE_IDS.INVENTARIO_ADMINISTRADOR;
   const inventoryGlobal = roleIds.length === 1 && roleIds[0] === ROLE_IDS.INVENTARIO_GLOBAL;
   const inventoryBranches = uniqueIds(mappings.filter(row => Number(row.rol_id) === roleIds[0]).map(row => row.sucursal_id));
-  const inventoryBranch = inventoryOnly && !inventoryGlobal && roleIds.length === 1 && inventoryBranches.length === 1
+  const inventoryBranch = inventoryOnly && !inventoryGlobal && !inventoryAdmin && roleIds.length === 1 && inventoryBranches.length === 1
     && sucursales.some(row => Number(row.id) === inventoryBranches[0]);
   const hasGlobal = roleIds.includes(ROLE_IDS.ADMINISTRADOR);
   const hasBranchAdmin = branchRoleIds(roleIds).length > 0;
@@ -35,7 +36,7 @@ function buildAccessProfile(roles, sucursales, mappings) {
   const scope = !hasGlobal && hasBranchAdmin ? branchScope(roleIds, sucursales, mappings) : null;
   const existing = uniqueIds(sucursales.map((row) => row.id));
   let allowed = [];
-  if (isAdmin || inventoryGlobal) allowed = existing;
+  if (isAdmin || inventoryAdmin || inventoryGlobal) allowed = existing;
   else if (inventoryBranch) allowed = inventoryBranches;
   else if (scope) allowed = [scope.sucursalId];
   else if (!hasGlobal && !hasBranchAdmin && !inventoryOnly) {
@@ -47,12 +48,13 @@ function buildAccessProfile(roles, sucursales, mappings) {
     is_admin: isAdmin,
     is_branch_admin: Boolean(scope),
     is_inventory_only: inventoryOnly,
-    can_select_inventory_branch: isAdmin || inventoryGlobal,
+    is_inventory_admin: inventoryAdmin,
+    can_select_inventory_branch: isAdmin || inventoryAdmin || inventoryGlobal,
     can_view_reports: isAdmin || Boolean(scope),
     can_manage_users: isAdmin || Boolean(scope),
-    can_manage_inventory: isAdmin || inventoryGlobal || inventoryBranch,
-    can_manage_inventory_catalog: isAdmin,
-    can_authorize_inventory_adjustments: isAdmin,
+    can_manage_inventory: isAdmin || inventoryAdmin || inventoryGlobal || inventoryBranch,
+    can_manage_inventory_catalog: isAdmin || inventoryAdmin,
+    can_authorize_inventory_adjustments: isAdmin || inventoryAdmin,
     allowed_sucursal_ids: allowed,
     can_view_all_orders: isAdmin || (!inventoryOnly && !hasGlobal && !hasBranchAdmin && existing.length > 0 && allowed.length === existing.length),
   };

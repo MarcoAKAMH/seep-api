@@ -39,8 +39,9 @@ test('catalog supplier assignment persists atomically and purchase orders respec
     const express = require('express');
     const app = express();
     app.use(express.json());
+    let principal = { sub: '1', is_admin: true, can_manage_inventory: true, can_manage_inventory_catalog: true };
     app.use((req, res, next) => {
-      req.user = { sub: '1', is_admin: true, can_manage_inventory: true, can_manage_inventory_catalog: true };
+      req.user = principal;
       next();
     });
     app.use(require('../src/routes/inventario/catalog'));
@@ -116,6 +117,73 @@ test('catalog supplier assignment persists atomically and purchase orders respec
       assert.match(mixed.body.message, /Partida 2/);
       const [[count]] = await pool.query('SELECT COUNT(*) total FROM inv_orden_compra');
       assert.equal(count.total, 1);
+    });
+    await t.test('editing allowed orders returns to draft and blocks sent or closed orders', async () => {
+      const body={sucursal_id:11,almacen_id:1,proveedor_id:supplier.body.id,
+        detalles:[{producto_id:product.body.id,cantidad:'2',costo_esperado:'17.123456'}]};
+      const createdOrder=await request('/compras/ordenes','POST',body);
+      assert.equal(createdOrder.status,201);
+      const orderId=createdOrder.body.id;
+      for(const state of ['BORRADOR','PENDIENTE_AUTORIZACION','AUTORIZADA']) {
+        await pool.query('UPDATE inv_orden_compra SET estado=?,solicitado_at=NOW(),autorizado_por=1,autorizado_at=NOW() WHERE id=?',[state,orderId]);
+        const updated=await request(`/compras/ordenes/${orderId}`,'PUT',{...body,notas:'Editada'});
+        assert.equal(updated.status,200,JSON.stringify(updated.body));
+        assert.equal(updated.body.estado,'BORRADOR');
+        const [[stored]]=await pool.query('SELECT * FROM inv_orden_compra WHERE id=?',[orderId]);
+        assert.equal(stored.folio,createdOrder.body.folio);
+        for(const key of ['solicitado_at','autorizado_por','autorizado_at'])assert.equal(stored[key],null);
+        const [[detail]]=await pool.query('SELECT * FROM inv_orden_compra_detalle WHERE orden_compra_id=?',[orderId]);
+        assert.equal(detail.costo_esperado,'17.123456');
+        const [[audit]]=await pool.query("SELECT antes,despues FROM inv_auditoria WHERE entidad='inv_orden_compra' AND entidad_id=? AND accion='ACTUALIZAR' ORDER BY id DESC LIMIT 1",[orderId]);
+        const before=typeof audit.antes==='string'?JSON.parse(audit.antes):audit.antes;
+        assert.equal(before.estado,state);
+        assert.equal(before.detalles.length,1);
+      }
+      for(const state of ['ENVIADA','PARCIAL','RECIBIDA','RECHAZADA','CANCELADA']) {
+        await pool.query('UPDATE inv_orden_compra SET estado=? WHERE id=?',[state,orderId]);
+        assert.equal((await request(`/compras/ordenes/${orderId}`,'PUT',body)).status,409);
+        const [[stored]]=await pool.query('SELECT estado FROM inv_orden_compra WHERE id=?',[orderId]);
+        assert.equal(stored.estado,state);
+      }
+      const found=await request('/productos/buscar?q=SUP&limit=1');
+      assert.equal(found.status,200);
+      assert.equal(found.body.items.length,1);
+      assert.equal(found.body.has_more,true);
+      const next=await request('/productos/buscar?q=SUP&limit=1&offset=1');
+      assert.notEqual(next.body.items[0].id,found.body.items[0].id);
+      assert.ok(String(found.body.items[0].nombre_comercial).localeCompare(String(next.body.items[0].nombre_comercial),'es',{sensitivity:'base'})<=0);
+      const sorted=await request('/productos?orden=nombre&limit=1');
+      assert.equal(sorted.status,200);
+      const [expected]=await pool.query('SELECT id FROM inv_producto ORDER BY nombre_comercial,sku,id LIMIT 1');
+      assert.equal(sorted.body.items[0].id,expected[0].id);
+    });
+    await t.test('last purchase cost uses the latest order, retains precision and respects branch scope', async () => {
+      const endpoint=`/compras/ultimo-costo?producto_id=${product.body.id}`;
+      assert.equal((await request('/compras/ultimo-costo?producto_id=999999')).body, null);
+      assert.equal((await request('/compras/ultimo-costo?producto_id=invalid')).status, 400);
+      const body={sucursal_id:11,almacen_id:1,proveedor_id:supplier.body.id,
+        detalles:[{producto_id:product.body.id,cantidad:'1',costo_esperado:'123.456789'}]};
+      const first=await request('/compras/ordenes','POST',body);
+      const second=await request('/compras/ordenes','POST',{...body,detalles:[{...body.detalles[0],costo_esperado:'0'}]});
+      assert.equal(first.status,201,JSON.stringify(first.body));
+      assert.equal(second.status,201,JSON.stringify(second.body));
+      // A zero is an unset expected cost; reuse the latest recorded positive price.
+      await pool.query("UPDATE inv_orden_compra SET created_at='2030-01-01 00:00:00' WHERE id IN (?,?)",[first.body.id,second.body.id]);
+      let result=await request(endpoint);
+      assert.equal(result.status,200);
+      assert.equal(result.body.orden_compra_id,first.body.id);
+      assert.equal(result.body.costo_esperado,'123.456789');
+      await pool.query("UPDATE inv_orden_compra SET created_at='2030-01-02 00:00:00' WHERE id=?",[first.body.id]);
+      result=await request(endpoint);
+      assert.equal(result.body.orden_compra_id,first.body.id);
+      assert.equal(result.body.costo_esperado,'123.456789');
+      const original=principal;
+      try {
+        principal={sub:'1',is_inventory_only:true,can_manage_inventory:true,allowed_sucursal_ids:[22]};
+        assert.equal((await request(endpoint)).body,null);
+        principal={...principal,allowed_sucursal_ids:[11]};
+        assert.equal((await request(endpoint)).body.costo_esperado,'123.456789');
+      } finally { principal=original; }
     });
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));

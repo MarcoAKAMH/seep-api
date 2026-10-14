@@ -4,7 +4,7 @@ const { buildAccessProfile, validateRoleCombination, canManageRoleIds } = requir
 const { inventoryScope, resolveInventoryScope } = require('../src/utils/inventoryAccess');
 const { getOrderScope } = require('../src/utils/sucursalAccess');
 const isolate = require('../src/middleware/inventoryIsolation');
-const roles = Array.from({ length: 8 }, (_, i) => ({ id: i + 1 }));
+const roles = Array.from({ length: 9 }, (_, i) => ({ id: i + 1 }));
 const branches = [{ id: 11 }, { id: 22 }];
 const mappings = [{ rol_id: 7, sucursal_id: 11 }, { rol_id: 8, sucursal_id: 22 }, { rol_id: 4, sucursal_id: 11 }, { rol_id: 2, sucursal_id: 11 }];
 const profile = (...ids) => buildAccessProfile(ids.map(id => ({ id })), branches, mappings);
@@ -34,7 +34,7 @@ test('inventory branch scope rejects another branch and shared catalog writes', 
 });
 
 test('mixed inventory roles fail closed even for existing invalid assignments', () => {
-  for (const ids of [[6,1], [6,2], [7,4], [7,8], [7,6]]) {
+  for (const ids of [[6,1], [6,2], [7,4], [7,8], [7,6], [9,1], [9,2], [9,6], [9,7]]) {
     assert.throws(() => validateRoleCombination(ids, roles, branches, mappings), { status: 400 });
     assert.equal(profile(...ids).can_manage_inventory, false);
     assert.equal(profile(...ids).is_inventory_only, true);
@@ -64,10 +64,55 @@ test('role migration previews, repeats safely and refuses occupied IDs', async (
   await migrateInventoryUsers(db, false);
   assert.equal(inserts, 0);
   await migrateInventoryUsers(db, true);
-  assert.equal(inserts, 5);
+  assert.equal(inserts, 6);
   await migrateInventoryUsers(db, true);
-  assert.equal(inserts, 5);
+  assert.equal(inserts, 6);
   storedRoles.find(role => role.id === 6).nombre = 'Otro rol existente';
   await assert.rejects(migrateInventoryUsers(db, true), /Conflicto de rol/);
-  assert.equal(inserts, 5);
+  assert.equal(inserts, 6);
+});
+
+
+test('inventory administrator has full inventory scope but no workshop or user access', async () => {
+  const user = profile(9);
+  assert.equal(user.is_inventory_admin, true);
+  assert.equal(user.is_inventory_only, true);
+  for (const flag of ['can_manage_inventory', 'can_manage_inventory_catalog', 'can_authorize_inventory_adjustments', 'can_select_inventory_branch']) assert.equal(user[flag], true);
+  for (const flag of ['is_admin', 'can_manage_users', 'can_view_reports', 'can_view_all_orders']) assert.equal(user[flag], false);
+  assert.deepEqual(user.allowed_sucursal_ids, [11, 22]);
+  assert.equal(inventoryScope(user), null);
+  assert.throws(() => getOrderScope(user), { status: 403 });
+  let status;
+  isolate({ user }, { status(code) { status = code; return this; }, json() {} }, () => assert.fail('Workshop access leaked'));
+  assert.equal(status, 403);
+  assert.equal(canManageRoleIds(user, [9]), false);
+  assert.equal(canManageRoleIds(profile(4), [9]), false);
+  assert.equal(canManageRoleIds(profile(1), [9]), true);
+  assert.deepEqual(validateRoleCombination([9], roles, branches, mappings), [9]);
+});
+
+test('inventory HTTP gate allows administrator operations and keeps consultation roles read-only', async () => {
+  const express = require('express');
+  const auth = require('../src/middleware/auth');
+  const original = auth.required;
+  auth.required = (req, res, next) => { req.user = profile(Number(req.headers['x-test-role'])); next(); };
+  let router;
+  try { router = require('../src/routes/inventario'); } finally { auth.required = original; }
+  const app = express();
+  app.use(express.json(), router);
+  app.use((err, req, res, next) => res.status(err.status || 500).json({ message: err.message }));
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const role of [1, 6, 7, 8, 9]) {
+      const headers = { 'x-test-role': String(role), 'content-type': 'application/json' };
+      const access = await fetch(base + '/acceso', { headers });
+      assert.equal(access.status, 200);
+      for (const endpoint of ['/movimientos', '/productos', '/proveedores']) {
+        const response = await fetch(base + endpoint, { method: 'POST', headers, body: '{}' });
+        assert.equal(response.status, [1, 9].includes(role) ? 400 : 403, `${role}: ${endpoint}`);
+      }
+    }
+  } finally { await new Promise(resolve => server.close(resolve)); }
 });

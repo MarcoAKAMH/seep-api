@@ -34,16 +34,22 @@ async function saveDraftOrder(input, userId, orderId = null) {
   const db = await pool.getConnection();
   try {
     await db.beginTransaction();
-    const subtotal = await validateOrderReferences(db,input);
+    let before = null;
     let id = orderId;
     let orderFolio;
     if (orderId) {
       const [rows] = await db.query('SELECT * FROM inv_orden_compra WHERE id=? FOR UPDATE', [orderId]);
       if (!rows.length) fail('La orden de compra no existe.',404);
-      if (rows[0].estado !== 'BORRADOR') fail('Solo se puede editar una orden en borrador.',409);
+      if (!['BORRADOR','PENDIENTE_AUTORIZACION','AUTORIZADA'].includes(rows[0].estado)) fail('Esta orden ya no permite ediciones.',409);
+      const [details] = await db.query('SELECT * FROM inv_orden_compra_detalle WHERE orden_compra_id=? FOR UPDATE', [orderId]);
+      before = { ...rows[0], detalles: details };
+      if (details.some(line => toUnits(line.cantidad_recibida) > 0n)) fail('No se puede editar una orden con recepciones.',409);
       if (Number(rows[0].sucursal_id) !== Number(input.sucursal_id)) fail('No se puede cambiar la sucursal de la orden.');
       orderFolio = rows[0].folio;
-      await db.query(`UPDATE inv_orden_compra SET almacen_id=?,proveedor_id=?,fecha_estimada=?,condiciones_pago=?,notas=?,subtotal_estimado=? WHERE id=?`,
+    }
+    const subtotal = await validateOrderReferences(db,input);
+    if (orderId) {
+      await db.query(`UPDATE inv_orden_compra SET estado='BORRADOR',solicitado_at=NULL,autorizado_por=NULL,autorizado_at=NULL,almacen_id=?,proveedor_id=?,fecha_estimada=?,condiciones_pago=?,notas=?,subtotal_estimado=? WHERE id=?`,
         [input.almacen_id,input.proveedor_id,input.fecha_estimada || null,input.condiciones_pago || null,input.notas || null,subtotal,orderId]);
       await db.query('DELETE FROM inv_orden_compra_detalle WHERE orden_compra_id=?', [orderId]);
     } else {
@@ -58,8 +64,8 @@ async function saveDraftOrder(input, userId, orderId = null) {
       [input.detalles.map(line => [id,line.producto_id,line.cantidad,line.costo_esperado])]);
     for (const line of input.detalles) await db.query(`INSERT INTO inv_producto_proveedor(producto_id,proveedor_id,sucursal_id,costo_referencia)
       VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE costo_referencia=VALUES(costo_referencia)`, [line.producto_id,input.proveedor_id,input.sucursal_id,line.costo_esperado]);
-    await db.query(`INSERT INTO inv_auditoria(sucursal_id,usuario_id,accion,entidad,entidad_id,despues) VALUES (?,?,'${orderId ? 'ACTUALIZAR' : 'CREAR'}','inv_orden_compra',?,?)`,
-      [input.sucursal_id,userId,id,JSON.stringify({ folio: orderFolio, estado: 'BORRADOR', subtotal_estimado: subtotal })]);
+    await db.query(`INSERT INTO inv_auditoria(sucursal_id,usuario_id,accion,entidad,entidad_id,antes,despues) VALUES (?,?,'${orderId ? 'ACTUALIZAR' : 'CREAR'}','inv_orden_compra',?,?,?)`,
+      [input.sucursal_id,userId,id,before ? JSON.stringify(before) : null,JSON.stringify({ ...input, folio: orderFolio, estado: 'BORRADOR', subtotal_estimado: subtotal })]);
     await db.commit();
     return { id:Number(id),folio:orderFolio,estado:'BORRADOR',subtotal_estimado:subtotal };
   } catch (error) { await db.rollback(); if (error.code === 'ER_DUP_ENTRY') fail('La orden contiene datos duplicados.',409); throw error; } finally { db.release(); }

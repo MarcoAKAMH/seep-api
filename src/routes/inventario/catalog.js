@@ -33,6 +33,7 @@ function validate(schema, value) {
 function units(value) { const [whole, fraction = ''] = value.split('.'); return BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, '0')); }
 const querySchema = Joi.object({ q: Joi.string().trim().max(180).allow('').default(''), sucursal_id: id.optional(),
   limit: Joi.number().integer().min(1).max(100).default(20), offset: Joi.number().integer().min(0).max(1000000).default(0),
+  orden: Joi.string().valid('nombre').optional(),
   activo: Joi.number().valid(0, 1).optional(), categoria_id: id.optional(),
   tipo: Joi.string().valid('MATERIA_PRIMA','PRODUCTO_TERMINADO','CONSUMIBLE').optional(),
 });
@@ -65,10 +66,22 @@ router.get('/catalogos', asyncHandler(async (req, res) => {
   const [categorias] = await pool.query('SELECT * FROM inv_categoria ORDER BY nombre');
   const [unidades] = await pool.query('SELECT * FROM inv_unidad ORDER BY nombre');
   const [sucursales] = await pool.query(`SELECT i.id, i.nombre FROM (SELECT id, nombre, id AS sucursal_id FROM cat_sucursal) i WHERE ${filter.sql} ORDER BY nombre`, filter.params);
-  if (req.user.is_inventory_only) return res.json({ categorias, unidades, sucursales, almacenes: [], ubicaciones: [] });
+  if (req.user.is_inventory_only && !req.user.is_inventory_admin) return res.json({ categorias, unidades, sucursales, almacenes: [], ubicaciones: [] });
   const [almacenes] = await pool.query(`SELECT i.* FROM inv_almacen i WHERE ${filter.sql} ORDER BY nombre`, filter.params);
   const [ubicaciones] = await pool.query(`SELECT i.* FROM inv_ubicacion i WHERE ${filter.sql} ORDER BY codigo`, filter.params);
   res.json({ categorias, unidades, sucursales, almacenes, ubicaciones });
+}));
+
+// Lean lookup for purchase selectors: one query, no catalog count or supplier enrichment.
+router.get('/productos/buscar', asyncHandler(async (req, res) => {
+  const q = validate(Joi.object({ q: Joi.string().trim().max(180).allow('').default(''),
+    limit: Joi.number().integer().min(1).max(100).default(50),
+    offset: Joi.number().integer().min(0).max(1000000).default(0) }), req.query);
+  const escaped = `%${q.q.replace(/[!%_]/g, c => '!' + c)}%`;
+  const [rows] = await pool.query(`SELECT id,sku,nombre_comercial FROM inv_producto
+    WHERE activo=1 AND (sku LIKE ? ESCAPE '!' OR nombre_comercial LIKE ? ESCAPE '!' OR nombre_tecnico LIKE ? ESCAPE '!')
+    ORDER BY nombre_comercial,sku,id LIMIT ? OFFSET ?`, [escaped,escaped,escaped,q.limit+1,q.offset]);
+  res.json({ items: rows.slice(0,q.limit), has_more: rows.length>q.limit });
 }));
 
 for (const [route, def] of Object.entries(definitions)) {
@@ -90,9 +103,10 @@ for (const [route, def] of Object.entries(definitions)) {
     }
     const where = conditions.join(' AND ');
     const [[count]] = await pool.query(`SELECT COUNT(*) total FROM ${def.table} i WHERE ${where}`, params);
-    const projection = req.user.is_inventory_only ? 'i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo' : 'i.*';
-    const [items] = await pool.query(`SELECT ${projection} FROM ${def.table} i WHERE ${where} ORDER BY i.id DESC LIMIT :limit OFFSET :offset`, params);
-    if (route === 'productos' && !req.user.is_inventory_only && items.length) {
+    const projection = (req.user.is_inventory_only && !req.user.is_inventory_admin) ? 'i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo' : 'i.*';
+    const orderBy = route === 'productos' && q.orden === 'nombre' ? 'i.nombre_comercial ASC,i.sku ASC,i.id ASC' : 'i.id DESC';
+    const [items] = await pool.query(`SELECT ${projection} FROM ${def.table} i WHERE ${where} ORDER BY ${orderBy} LIMIT :limit OFFSET :offset`, params);
+    if (route === 'productos' && (!req.user.is_inventory_only || req.user.is_inventory_admin) && items.length) {
       const supplierScope = inventoryScopeSql(scope.sucursalIds);
       const [suppliers] = await pool.query(`SELECT i.producto_id,
         IF(COUNT(DISTINCT i.proveedor_id)=1,MIN(i.proveedor_id),NULL) proveedor_id,
@@ -109,7 +123,7 @@ for (const [route, def] of Object.entries(definitions)) {
   }));
 
   async function save(req, res) {
-    if (def.global && !req.user.can_manage_inventory_catalog) fail('Solo el administrador global puede modificar el catálogo compartido.', 403);
+    if (def.global && !req.user.can_manage_inventory_catalog) fail('Solo el administrador global o de inventario puede modificar el catálogo compartido.', 403);
     const body = validate(def.schema, req.body);
     const recordId = req.params.id === undefined ? null : validate(id, req.params.id);
     const result = await transaction(async db => {
@@ -180,8 +194,8 @@ for (const [route, def] of Object.entries(definitions)) {
 }
 
 router.delete('/productos/:id', asyncHandler(async (req, res) => {
-  if (!req.user.is_admin || !req.user.can_manage_inventory_catalog) {
-    fail('Solo el administrador global puede eliminar artículos.', 403);
+  if ((!req.user.is_admin && !req.user.is_inventory_admin) || !req.user.can_manage_inventory_catalog) {
+    fail('Solo el administrador global o de inventario puede eliminar artículos.', 403);
   }
   const productId = validate(id, req.params.id);
   await transaction(async db => {

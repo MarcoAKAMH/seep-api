@@ -53,6 +53,17 @@ router.get('/compras/propuestas',asyncHandler(async(req,res)=>{const q=validate(
     GROUP BY pa.producto_id,pa.almacen_id,pa.sucursal_id,p.sku,p.nombre_comercial,a.nombre,s.nombre,pa.punto_reorden,pa.maximo,pp.proveedor_id,pr.nombre_comercial,pp.costo_referencia,c.costo_promedio
     HAVING cantidad<=pa.punto_reorden ORDER BY (cantidad=0) DESC,p.nombre_comercial LIMIT ? OFFSET ?`,[...params,q.limit,q.offset]);res.json({items,total:items.length,limit:q.limit,offset:q.offset});}));
 
+// Use creation time, then ID, so edits to older orders do not change which order is latest.
+router.get('/compras/ultimo-costo',asyncHandler(async(req,res)=>{
+  const q=validate(Joi.object({producto_id:id}),req.query);
+  const filter=scopeFilter(req.user);
+  const [rows]=await pool.query(`SELECT d.costo_esperado,i.id orden_compra_id,i.folio,i.created_at
+    FROM inv_orden_compra_detalle d JOIN inv_orden_compra i ON i.id=d.orden_compra_id
+    WHERE d.producto_id=? AND d.costo_esperado>0 AND ${filter.sql}
+    ORDER BY i.created_at DESC,i.id DESC,d.id DESC LIMIT 1`,[q.producto_id,...filter.params]);
+  res.json(rows[0]||null);
+}));
+
 router.get('/compras/ordenes',asyncHandler(async(req,res)=>{const q=validate(listSchema,req.query);const scope=await resolveInventoryScope(req.user,q.sucursal_id,pool);const filter=scope.sucursalIds===null?{sql:'1=1',params:[]}:{sql:'i.sucursal_id=?',params:[scope.sucursalIds[0]]};const conditions=[filter.sql],params=[...filter.params];if(q.estado){conditions.push('i.estado=?');params.push(q.estado);}if(q.proveedor_id){conditions.push('i.proveedor_id=?');params.push(q.proveedor_id);}if(q.q){const search=`%${q.q.replace(/[!%_]/g,v=>`!${v}`)}%`;conditions.push("(i.folio LIKE ? ESCAPE '!' OR p.nombre_comercial LIKE ? ESCAPE '!')");params.push(search,search);}const where=conditions.join(' AND ');const [[count]]=await pool.query(`SELECT COUNT(*) total FROM inv_orden_compra i JOIN inv_proveedor p ON p.id=i.proveedor_id WHERE ${where}`,params);const [items]=await pool.query(`SELECT i.*,p.nombre_comercial proveedor_nombre,s.nombre sucursal_nombre,a.nombre almacen_nombre,u.nombre creado_por_nombre FROM inv_orden_compra i JOIN inv_proveedor p ON p.id=i.proveedor_id JOIN cat_sucursal s ON s.id=i.sucursal_id JOIN inv_almacen a ON a.id=i.almacen_id JOIN usuario u ON u.id=i.creado_por WHERE ${where} ORDER BY i.created_at DESC LIMIT ? OFFSET ?`,[...params,q.limit,q.offset]);if(items.length){const [details]=await pool.query(`SELECT d.*,p.sku,p.nombre_comercial,p.unidad_id FROM inv_orden_compra_detalle d JOIN inv_producto p ON p.id=d.producto_id WHERE d.orden_compra_id IN (${items.map(()=>'?').join(',')}) ORDER BY d.id`,items.map(row=>row.id));for(const item of items)item.detalles=details.filter(line=>Number(line.orden_compra_id)===Number(item.id));}res.json({items,total:Number(count.total),limit:q.limit,offset:q.offset});}));
 router.post('/compras/ordenes',asyncHandler(async(req,res)=>{const body=validate(orderSchema,req.body);await resolveInventoryScope(req.user,body.sucursal_id,pool);res.status(201).json(await saveDraftOrder(body,Number(req.user.sub)));}));
 router.put('/compras/ordenes/:id',asyncHandler(async(req,res)=>{const orderId=validate(id,req.params.id);const body=validate(orderSchema,req.body);await orderScope(req,orderId);await resolveInventoryScope(req.user,body.sucursal_id,pool);res.json(await saveDraftOrder(body,Number(req.user.sub),orderId));}));

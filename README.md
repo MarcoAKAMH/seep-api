@@ -297,3 +297,23 @@ DB_SSL=true
 DB_SSL_REJECT_UNAUTHORIZED=true
 DB_SSL_CA_PATH=/home/ubuntu/certs/global-bundle.pem
 ```
+
+
+### Rol Inventario administrador
+
+El rol 9, `Inventario administrador`, permite administrar todas las secciones de
+inventario en todas las sucursales, incluyendo catálogos, movimientos, inventario
+inicial y autorización de ajustes. No permite acceder a los otros módulos ni
+administrar usuarios. Solo el administrador global puede asignarlo al crear o
+editar usuarios y no se combina con otros roles. Los roles 6, 7 y 8 mantienen
+su acceso de consulta.
+
+Antes de usar el rol en otro entorno, ejecutar desde `seep-api`:
+
+```powershell
+node scripts/migrate-inventory-users.js
+node scripts/migrate-inventory-users.js --apply
+```
+
+La migración es repetible y rechaza conflictos de identificadores o nombres.
+Desplegar también los cambios de API y frontend.
