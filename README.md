@@ -1,5 +1,14 @@
   # SEEP Node API (MySQL + Express + Joi + JWT)
 
+## Versión de Node.js
+
+Usa Node.js 24.22.1 LTS o una versión posterior de la rama 24 para instalar y
+ejecutar la API. La actualización de seguridad del 21 de octubre de 2026 corrige
+vulnerabilidades de TLS, DNS, HTTP y Brotli presentes en versiones anteriores.
+Después de actualizar Node en el servidor, ejecuta `npm ci --omit=dev` y reinicia
+el servicio. Comprueba la versión real del proceso con `node --version`; cambiar
+solo los archivos del repositorio no actualiza el runtime en producción.
+
 ## Inventario independiente
 
 Etapa 1: estructura MySQL y permisos globales/por sucursal. Consultar

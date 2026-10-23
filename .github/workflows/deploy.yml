@@ -17,11 +17,16 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check dependencies and tests
+        run: |
+          npm audit --audit-level=moderate
+          npm test
 
   deploy:
     if: github.event_name == 'push'
@@ -44,6 +49,12 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.LIGHTSAIL_PORT }}" \
             ${{ secrets.LIGHTSAIL_USER }}@${{ secrets.LIGHTSAIL_HOST }} \
             "mkdir -p /home/ubuntu/seep-api"
+
+      - name: Verify API server Node version
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ secrets.LIGHTSAIL_PORT }}" \
+            ${{ secrets.LIGHTSAIL_USER }}@${{ secrets.LIGHTSAIL_HOST }} \
+            "sudo /usr/bin/node --version && sudo /usr/bin/node -e 'const [major,minor,patch]=process.versions.node.split(String.fromCharCode(46)).map(Number); if(major!==24||minor<22||(minor===22&&patch<1)) process.exit(1)'"
 
       - name: Sync API code without .env
         run: |

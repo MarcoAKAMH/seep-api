@@ -3,6 +3,11 @@
 Estos archivos asumen que el API está en `/home/ubuntu/seep-api`, el frontend en
 `/home/ubuntu/seep-app` y Nginx publica ambos bajo el mismo dominio.
 
+Antes de enviar cambios a `main`, comprueba en Lightsail la versión que ejecuta
+el servicio: `sudo /usr/bin/node --version`. Debe ser `v24.22.1` o posterior de
+la rama 24. El despliegue automático verifica esa versión antes de copiar archivos
+y reiniciar la API; si el servidor usa una versión anterior, primero actualízala.
+
 ## Preparar el API
 
 ```bash
