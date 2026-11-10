@@ -4,6 +4,7 @@ const { pool } = require('../../config/db');
 const asyncHandler = require('../../utils/asyncHandler');
 const { resolveInventoryScope, inventoryScopeSql } = require('../../utils/inventoryAccess');
 const { syncInventoryAlerts } = require('../../services/inventoryAlerts');
+const { photoUrl, photosSchema, productPhotos, updatedProductPhotos, serializeProductPhotos } = require('../../utils/productPhotos');
 
 const id = Joi.number().integer().min(1).max(Number.MAX_SAFE_INTEGER).required();
 const text = max => Joi.string().trim().max(max).required();
@@ -14,7 +15,8 @@ const definitions = {
   productos: { table: 'inv_producto', global: true, search: ['sku', 'nombre_comercial', 'nombre_tecnico'], schema: Joi.object({
     sku: text(80), nombre_comercial: text(180), nombre_tecnico: text(255), categoria_id: id, unidad_id: id,
     tipo: Joi.string().valid('MATERIA_PRIMA', 'PRODUCTO_TERMINADO', 'CONSUMIBLE').required(),
-    foto_url: Joi.alternatives().try(Joi.string().uri({ scheme: ['https'] }).max(1024), Joi.string().pattern(/^\/inventario\/fotos\/[0-9a-f-]{36}\.(jpg|png|webp)$/)).allow('', null).empty('').default(null),
+    foto_url: photoUrl.allow('', null).empty('').optional(),
+    fotos: photosSchema.optional(),
     precio_publico: decimal, precio_mayoreo: decimal, activo: active,
     proveedor_id: id.optional(),
   }) },
@@ -103,7 +105,7 @@ for (const [route, def] of Object.entries(definitions)) {
     }
     const where = conditions.join(' AND ');
     const [[count]] = await pool.query(`SELECT COUNT(*) total FROM ${def.table} i WHERE ${where}`, params);
-    const projection = (req.user.is_inventory_only && !req.user.is_inventory_admin) ? 'i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo' : 'i.*';
+    const projection = (req.user.is_inventory_only && !req.user.is_inventory_admin) ? 'i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.fotos,i.precio_publico,i.precio_mayoreo,i.activo' : 'i.*';
     const orderBy = route === 'productos' && q.orden === 'nombre' ? 'i.nombre_comercial ASC,i.sku ASC,i.id ASC' : 'i.id DESC';
     const [items] = await pool.query(`SELECT ${projection} FROM ${def.table} i WHERE ${where} ORDER BY ${orderBy} LIMIT :limit OFFSET :offset`, params);
     if (route === 'productos' && (!req.user.is_inventory_only || req.user.is_inventory_admin) && items.length) {
@@ -119,7 +121,7 @@ for (const [route, def] of Object.entries(definitions)) {
       for (const item of items) Object.assign(item, suppliers.find(row => Number(row.producto_id) === Number(item.id)) ||
         { proveedor_id: null, proveedor_nombre: null, proveedor_activo: null, proveedores_asignados: 0 });
     }
-    res.json({ items, total: Number(count.total), limit: q.limit, offset: q.offset });
+    res.json({ items: route === 'productos' ? items.map(serializeProductPhotos) : items, total: Number(count.total), limit: q.limit, offset: q.offset });
   }));
 
   async function save(req, res) {
@@ -162,7 +164,12 @@ for (const [route, def] of Object.entries(definitions)) {
         if (stock.length) fail('No se puede desactivar un registro con existencias. Primero registra su salida o transferencia.', 409);
       }
       const data = { ...body };
-      if (route === 'productos') delete data.proveedor_id;
+      if (route === 'productos') {
+        delete data.proveedor_id;
+        const photos = updatedProductPhotos(before, body);
+        data.fotos = JSON.stringify(photos);
+        data.foto_url = photos[0] || null;
+      }
       if (!recordId && route === 'productos') data.creado_por = Number(req.user.sub);
       const fields = Object.keys(data); // Only schema-validated fields, never client identifiers.
       let savedId = recordId;
@@ -185,13 +192,47 @@ for (const [route, def] of Object.entries(definitions)) {
           { producto_id: savedId, proveedor_id: body.proveedor_id, sucursal_ids: branches.map(branch => branch.sucursal_id) });
       }
       await audit(db, req, def.table, savedId, before, data, body.sucursal_id);
-      return { id: savedId, ...body };
+      return route === 'productos' ? serializeProductPhotos({ id: savedId, ...body, fotos: data.fotos }) : { id: savedId, ...body };
     });
     res.status(recordId ? 200 : 201).json(result);
   }
   router.post(`/${route}`, asyncHandler(save));
   router.put(`/${route}/:id`, asyncHandler(save));
 }
+
+router.put('/productos/:id/foto-principal', asyncHandler(async (req, res) => {
+  if (!req.user.can_manage_inventory_catalog) fail('No tienes permiso para cambiar la foto principal.', 403);
+  const productId = validate(id, req.params.id);
+  const body = validate(Joi.object({ foto_url: photoUrl.required() }), req.body);
+  const result = await transaction(async db => {
+    const [products] = await db.query('SELECT * FROM inv_producto WHERE id=? FOR UPDATE', [productId]);
+    if (!products.length) fail('El artículo no existe.', 404);
+    const before = products[0];
+    const current = productPhotos(before);
+    if (!current.includes(body.foto_url)) fail('La foto seleccionada ya no pertenece a este artículo.', 409);
+    const fotos = [body.foto_url, ...current.filter(url => url !== body.foto_url)];
+    await db.query('UPDATE inv_producto SET fotos=?,foto_url=? WHERE id=?', [JSON.stringify(fotos), fotos[0], productId]);
+    await audit(db, req, 'inv_producto', productId, before, { ...before, fotos, foto_url: fotos[0] });
+    return { id: productId, fotos, foto_url: fotos[0] };
+  });
+  res.json(result);
+}));
+
+router.delete('/productos/:id/fotos', asyncHandler(async (req, res) => {
+  if (!req.user.can_manage_inventory_catalog) fail('No tienes permiso para eliminar fotografías.', 403);
+  const productId = validate(id, req.params.id);
+  const body = validate(Joi.object({ foto_url: photoUrl.required() }), req.body);
+  const result = await transaction(async db => {
+    const [products] = await db.query('SELECT * FROM inv_producto WHERE id=? FOR UPDATE', [productId]);
+    if (!products.length) fail('El artículo no existe.', 404);
+    const before = products[0];
+    const fotos = productPhotos(before).filter(url => url !== body.foto_url);
+    await db.query('UPDATE inv_producto SET fotos=?,foto_url=? WHERE id=?', [JSON.stringify(fotos), fotos[0] || null, productId]);
+    await audit(db, req, 'inv_producto', productId, before, { ...before, fotos, foto_url: fotos[0] || null });
+    return { id: productId, fotos, foto_url: fotos[0] || null };
+  });
+  res.json(result);
+}));
 
 router.delete('/productos/:id', asyncHandler(async (req, res) => {
   if ((!req.user.is_admin && !req.user.is_inventory_admin) || !req.user.can_manage_inventory_catalog) {

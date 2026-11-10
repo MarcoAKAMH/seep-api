@@ -87,6 +87,20 @@ sudo certbot renew --dry-run
 
 ## Verificación después de cada despliegue
 
+### Galería de artículos (noviembre 2026)
+
+Antes de iniciar la API con soporte para diez fotos, ejecutar
+`node scripts/migrate-inventory-photos.js --apply`. Sin `--apply` se consulta
+el estado sin modificar datos. El workflow de despliegue ejecuta este paso
+antes de reiniciar el servicio. Publicar la API y completar esta migración
+antes del frontend.
+
+La columna JSON nullable `inv_producto.fotos` conserva `foto_url` como portada.
+Los registros anteriores con `fotos=NULL` siguen mostrando su foto actual.
+La eliminación desasocia la foto; la limpieza programada elimina archivos
+huérfanos según su retención habitual y protege todas las fotos de la galería.
+Para revertir el código, conservar la columna: no eliminarla ni vaciarla.
+
 ```bash
 systemctl is-active seep-api nginx
 curl -fsS http://127.0.0.1:3001/health

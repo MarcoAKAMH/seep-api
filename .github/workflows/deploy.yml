@@ -75,6 +75,7 @@ jobs:
               cd /home/ubuntu/seep-api
               npm ci --omit=dev
               node scripts/migrate-inventory-users.js --apply
+              node scripts/migrate-inventory-photos.js --apply
               sudo systemctl restart seep-api
               sudo systemctl status seep-api --no-pager
           EOF

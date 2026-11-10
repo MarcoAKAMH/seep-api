@@ -3,6 +3,7 @@ const path = require('node:path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config({ path: path.resolve(__dirname, '../.env.local'), override: true });
 const { pool } = require('../src/config/db');
+const { productPhotos } = require('../src/utils/productPhotos');
 const photoDirectory = path.resolve(process.env.INVENTORY_PHOTO_DIR || path.join(__dirname, '../uploads/inventory'));
 const evidenceDirectory = path.resolve(process.env.INVENTORY_COUNT_EVIDENCE_DIR || path.join(__dirname, '../uploads/inventory-counts'));
 const mediaPattern = /^[0-9a-f-]{36}\.(jpg|png|webp)$/;
@@ -12,10 +13,10 @@ async function cleanupInventoryMedia({ apply = false } = {}) {
   const orphanDays = Math.max(1, Number(process.env.INVENTORY_ORPHAN_MEDIA_DAYS || 30));
   const evidenceDays = Math.max(30, Number(process.env.INVENTORY_EVIDENCE_RETENTION_DAYS || 365));
   const cutoffOrphan = Date.now() - orphanDays * 86400000;
-  const [photoRows] = await pool.query("SELECT foto_url FROM inv_producto WHERE foto_url LIKE '/inventario/fotos/%'");
+  const [photoRows] = await pool.query('SELECT foto_url,fotos FROM inv_producto');
   const [expiredEvidence] = await pool.query(`SELECT d.id,d.evidencia_url FROM inv_conteo_ciclico_detalle d JOIN inv_conteo_ciclico c ON c.id=d.conteo_id
     WHERE d.evidencia_url IS NOT NULL AND c.estado IN ('COMPLETADO','CANCELADO') AND COALESCE(d.contado_at,c.created_at)<DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? DAY)`, [evidenceDays]);
-  const referencedPhotos = new Set(photoRows.map(row => String(row.foto_url).split('/').pop()));
+  const referencedPhotos = new Set(photoRows.flatMap(productPhotos).filter(url => url.startsWith('/inventario/fotos/')).map(url => url.split('/').pop()));
   const orphanPhotos = [];
   for (const name of await files(photoDirectory)) { const info = await fs.stat(path.join(photoDirectory, name)); if (!referencedPhotos.has(name) && info.mtimeMs < cutoffOrphan) orphanPhotos.push(name); }
   const referencedEvidence = new Set(expiredEvidence.map(row => String(row.evidencia_url).split('/').pop()));

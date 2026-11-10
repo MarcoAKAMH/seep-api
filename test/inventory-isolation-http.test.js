@@ -24,7 +24,7 @@ test('authenticated inventory accounts are denied on every non-inventory router'
     if (sql.includes('FROM (SELECT id, nombre, id AS sucursal_id FROM cat_sucursal)')) return [[{ id: 11, nombre: 'Alameda' }]];
     if (sql.startsWith('SELECT COUNT(*) total FROM inv_producto')) return [[{ total: 1 }]];
     if (sql.includes('FROM inv_producto i')) {
-      assert.ok(sql.startsWith('SELECT i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.precio_publico,i.precio_mayoreo,i.activo FROM'));
+      assert.ok(sql.startsWith('SELECT i.id,i.sku,i.nombre_comercial,i.nombre_tecnico,i.categoria_id,i.unidad_id,i.tipo,i.foto_url,i.fotos,i.precio_publico,i.precio_mayoreo,i.activo FROM'));
       return [[{ id: 1, sku: 'TEST', nombre_comercial: 'Tubo', precio_publico: '200', precio_mayoreo: '150' }]];
     }
     throw new Error('Unexpected data access: ' + sql);

@@ -94,6 +94,17 @@ test('inventory migration, constraints and authenticated HTTP access', { skip: p
         assert.equal(columns.length, 0);
       } finally { db.release(); }
     });
+    await t.test('photo gallery migration creates its column once', async () => {
+      const db = await pool.getConnection();
+      try {
+        const { migrateInventoryPhotos } = require('../scripts/migrate-inventory-photos');
+        assert.equal((await migrateInventoryPhotos(db)).status, 'pending');
+        assert.equal((await migrateInventoryPhotos(db, true)).status, 'applied');
+        assert.equal((await migrateInventoryPhotos(db, true)).status, 'already_applied');
+        const [columns] = await db.query("SHOW COLUMNS FROM inv_producto LIKE 'fotos'");
+        assert.equal(columns[0].Type, 'json');
+      } finally { db.release(); }
+    });
     await pool.query("INSERT INTO cat_sucursal(id,nombre) VALUES (11,'Alameda'),(22,'Chapala')");
     await pool.query("INSERT INTO rol(id,nombre) VALUES (1,'Global'),(2,'Agente A'),(3,'Agente C'),(4,'Admin A'),(5,'Admin C')");
     await pool.query('INSERT INTO rol_sucursal(rol_id,sucursal_id) VALUES (2,11),(3,22),(4,11),(5,22)');

@@ -26,6 +26,7 @@ test('catalog supplier assignment persists atomically and purchase orders respec
       await require('../scripts/migrate-inventory-controls').migrateInventoryControls(db, true);
       await require('../scripts/migrate-inventory-purchasing').migrateInventoryPurchasing(db, true);
       await require('../scripts/migrate-inventory-remove-barcode').migrateInventoryRemoveBarcode(db, true);
+      await require('../scripts/migrate-inventory-photos').migrateInventoryPhotos(db, true);
     } finally { db.release(); }
     await pool.query("INSERT INTO usuario(id,correo,nombre,password_hash,activo) VALUES (1,'supplier-test@example.com','Fixture','unused',1)");
     await pool.query("INSERT INTO cat_sucursal(id,nombre) VALUES (11,'Alameda'),(22,'Chapala')");
