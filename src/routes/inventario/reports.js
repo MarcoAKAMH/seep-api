@@ -125,6 +125,10 @@ router.get('/reportes/rotacion', asyncHandler(async (req, res) => {
   const from = `FROM (SELECT DISTINCT producto_id,sucursal_id FROM inv_producto_almacen) pb JOIN inv_producto p ON p.id=pb.producto_id
     JOIN cat_sucursal s ON s.id=pb.sucursal_id LEFT JOIN inv_movimiento m ON m.producto_id=pb.producto_id AND m.sucursal_id=pb.sucursal_id
       AND m.cantidad_delta<0 AND m.created_at>=DATE_SUB(UTC_TIMESTAMP(),INTERVAL ? DAY)
+      AND NOT EXISTS (SELECT 1 FROM inv_documento_detalle md JOIN inv_documento salida ON salida.id=md.documento_id
+        JOIN inv_documento entrada ON entrada.documento_origen_id=salida.id
+          AND entrada.tipo='TRANSFERENCIA_ENTRADA' AND entrada.sucursal_id=salida.sucursal_id
+        WHERE md.id=m.detalle_id AND salida.tipo='TRANSFERENCIA_SALIDA')
     WHERE ${conditions.join(' AND ')}`;
   const [[count]] = await pool.query(`SELECT COUNT(*) total FROM (SELECT pb.producto_id,pb.sucursal_id ${from} GROUP BY pb.producto_id,pb.sucursal_id) totals`, params);
   const direction = q.orden === 'menos' ? 'ASC' : 'DESC';

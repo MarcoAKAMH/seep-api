@@ -17,6 +17,7 @@ de esquema. Los traslados entre sucursales conservan su despacho y recepción.
 
 El costo promedio, el último costo y la cantidad total de la sucursal se conservan.
 Las alertas se evalúan sobre los saldos finales. Un fallo revierte ambas partes.
+Los traslados internos no incrementan las salidas del reporte de rotación.
 Los reintentos con el mismo identificador y contenido devuelven el resultado
 original; cambiar el contenido de una solicitud aplicada devuelve 409.
 

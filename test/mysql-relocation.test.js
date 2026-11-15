@@ -131,6 +131,20 @@ test('internal relocations: atomic balances, costs, retries and authenticated ac
         assert.deepEqual(await costs(), initialCost);
       } finally { await db.query('DROP TRIGGER reject_test_entry'); }
     });
+    await t.test('rotation excludes internal relocations and still counts ordinary exits', async () => {
+      const before = await request(1, '/reportes/rotacion?q=MOVE-TEST');
+      assert.equal(before.status, 200, JSON.stringify(before.body));
+      assert.equal(before.body.items.length, 1);
+      assert.equal(Number(before.body.items[0].cantidad_salida), 0);
+      assert.equal(before.body.items[0].movimientos_salida, 0);
+      const sale = await request(1, '/movimientos', { sucursal_id: 1, tipo: 'SALIDA', motivo: 'Venta', idempotencia: 'ordinary-exit-after-relocation',
+        detalles: [{ producto_id: 1, almacen_id: 1, ubicacion_id: 1, cantidad: '0.25' }] });
+      assert.equal(sale.status, 201, JSON.stringify(sale.body));
+      const after = await request(1, '/reportes/rotacion?q=MOVE-TEST');
+      assert.equal(Number(after.body.items[0].cantidad_salida), 0.25);
+      assert.equal(after.body.items[0].movimientos_salida, 1);
+      assert.deepEqual(await costs(), initialCost);
+    });
   } finally {
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
     if (db) await db.end();
