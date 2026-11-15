@@ -273,6 +273,26 @@ test('inventory migration, constraints and authenticated HTTP access', { skip: p
       assert.equal(kardex.body.total, 1);
       assert.equal(kardex.body.items[0].folio, first.body.folio);
     });
+    await t.test('stock lists only positive balances and keeps separate occupied locations', async () => {
+      await pool.query("INSERT INTO inv_ubicacion(id,almacen_id,sucursal_id,codigo) VALUES (3,1,11,'A-1-02')");
+      try {
+        await pool.query('INSERT INTO inv_existencia(producto_id,ubicacion_id,almacen_id,sucursal_id,cantidad) VALUES (1,3,1,11,0)');
+        const emptyLocation = await catalogRequest(2, '/existencias?q=TUB-TEST');
+        assert.equal(emptyLocation.body.total, 1);
+        assert.deepEqual(emptyLocation.body.items.map(row => row.ubicacion_id), [1]);
+        const emptyOnly = await catalogRequest(2, '/existencias?q=A-1-02');
+        assert.equal(emptyOnly.body.total, 0);
+        assert.deepEqual(emptyOnly.body.items, []);
+
+        await pool.query('UPDATE inv_existencia SET cantidad=1 WHERE producto_id=1 AND ubicacion_id=3');
+        const occupied = await catalogRequest(2, '/existencias?q=TUB-TEST');
+        assert.equal(occupied.body.total, 2);
+        assert.deepEqual(occupied.body.items.map(row => row.ubicacion_id).sort((a, b) => a - b), [1, 3]);
+      } finally {
+        await pool.query('DELETE FROM inv_existencia WHERE producto_id=1 AND ubicacion_id=3');
+        await pool.query('DELETE FROM inv_ubicacion WHERE id=3');
+      }
+    });
     await t.test('transfers use separate dispatch and receipt documents with branch scope', async () => {
       const payload = { sucursal_origen_id: 11, almacen_origen_id: 1, ubicacion_origen_id: 1,
         sucursal_destino_id: 22, almacen_destino_id: 2, ubicacion_destino_id: 2,

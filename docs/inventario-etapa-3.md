@@ -27,9 +27,13 @@ incluye reversas ni ajustes autorizados; corresponden a la siguiente etapa de co
 
 | Ruta bajo `/api/inventario` | Método | Función |
 | --- | --- | --- |
-| `/existencias` | GET | Saldos por ubicación, costo y valor |
+| `/existencias` | GET | Saldos positivos por ubicación, costo y valor |
 | `/kardex` | GET | Historial trazable de movimientos |
 | `/movimientos` | POST | Aplica documento y partidas en una transacción |
+
+La consulta de existencias omite ubicaciones con saldo cero tanto en los registros
+como en el total. Esos saldos permanecen en la base para conservar el historial del
+Kardex; un mismo artículo puede mostrarse en varias ubicaciones con saldo positivo.
 
 Las consultas aceptan `sucursal_id`, `q`, `producto_id`, `limit` y `offset`; kardex
 también acepta `tipo`. El movimiento acepta de 1 a 200 partidas. Para entradas,

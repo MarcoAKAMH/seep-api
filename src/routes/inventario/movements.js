@@ -31,7 +31,7 @@ router.get('/existencias', asyncHandler(async (req, res) => {
   const query = validate(listSchema, req.query);
   const scope = await resolveInventoryScope(req.user, query.sucursal_id, pool);
   const filter = inventoryScopeSql(scope.sucursalIds);
-  const conditions = [filter.sql];
+  const conditions = [filter.sql, 'i.cantidad > 0'];
   const params = { ...filter.params, limit: query.limit, offset: query.offset };
   if (query.producto_id) { conditions.push('i.producto_id=:product'); params.product = query.producto_id; }
   if (query.q) { params.search = `%${query.q.replace(/[!%_]/g, c => `!${c}`)}%`; conditions.push("(p.sku LIKE :search ESCAPE '!' OR p.nombre_comercial LIKE :search ESCAPE '!' OR u.codigo LIKE :search ESCAPE '!')"); }
