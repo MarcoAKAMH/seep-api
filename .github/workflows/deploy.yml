@@ -9,6 +9,17 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: inventory-test-password
+          MYSQL_DATABASE: inventory_test_bootstrap
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pinventory-test-password"
+          --health-interval=10s --health-timeout=5s --health-retries=12
 
     steps:
       - name: Checkout
@@ -27,6 +38,17 @@ jobs:
         run: |
           npm audit --audit-level=moderate
           npm test
+
+      - name: Verify internal relocations with isolated MySQL fixtures
+        run: node --test test/mysql-relocation.test.js
+        env:
+          SEEP_MYSQL_TESTS: '1'
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USER: root
+          DB_PASSWORD: inventory-test-password
+          DB_NAME: inventory_test_bootstrap
+          DB_SSL: 'false'
 
   deploy:
     if: github.event_name == 'push'

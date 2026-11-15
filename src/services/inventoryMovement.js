@@ -26,12 +26,15 @@ function weightedAverage(oldQty, oldCost, inQty, inCost) {
   return ((oldQty * oldCost) + (inQty * inCost) + total / 2n) / total;
 }
 
-async function applyDocument(input, userId, externalConnection = null) {
+async function applyDocument(input, userId, externalConnection = null, options = {}) {
   const ownConnection = !externalConnection;
   const db = externalConnection || await pool.getConnection();
   try {
     if (ownConnection) await db.beginTransaction();
     const type = String(input.tipo || '');
+    // Only the internal relocation service uses this mode inside its transaction.
+    const relocation = Boolean(externalConnection && options.internalRelocation);
+    if (relocation && !['TRANSFERENCIA_SALIDA', 'TRANSFERENCIA_ENTRADA'].includes(type)) throw inventoryError('Tipo de traslado inválido.');
     const internalType = input.internal_control === true && ['AJUSTE', 'REVERSA'].includes(type);
     if (!INBOUND.has(type) && !OUTBOUND.has(type) && !internalType) throw inventoryError('Tipo de movimiento no permitido.');
     if (!Array.isArray(input.detalles) || input.detalles.length < 1 || input.detalles.length > 200) throw inventoryError('Agrega entre 1 y 200 partidas.');
@@ -54,7 +57,7 @@ async function applyDocument(input, userId, externalConnection = null) {
       const quantity = toUnits(line.cantidad, `Partida ${index + 1}: cantidad`);
       if (quantity <= 0n) throw inventoryError(`Partida ${index + 1}: la cantidad debe ser mayor a cero.`);
       const inboundLine = INBOUND.has(type) || (internalType && input.direccion === 'ENTRADA');
-      const suppliedCost = inboundLine ? toUnits(line.costo_unitario, `Partida ${index + 1}: costo`) : null;
+      const suppliedCost = inboundLine && !relocation ? toUnits(line.costo_unitario, `Partida ${index + 1}: costo`) : null;
       return { productId, warehouseId, locationId, quantity, suppliedCost };
     });
     const keys = new Set();
@@ -90,12 +93,12 @@ async function applyDocument(input, userId, externalConnection = null) {
       const inbound = INBOUND.has(type) || (internalType && input.direccion === 'ENTRADA');
       const newLocationQty = inbound ? locationQty + line.quantity : locationQty - line.quantity;
       if (newLocationQty < 0n) throw inventoryError(`Stock insuficiente para el artículo ${line.productId} en la ubicación seleccionada.`, 409);
-      const movementCost = inbound ? line.suppliedCost : oldAverage;
-      const newAverage = inbound ? weightedAverage(branchQty, oldAverage, line.quantity, movementCost) : oldAverage;
+      const movementCost = inbound && !relocation ? line.suppliedCost : oldAverage;
+      const newAverage = inbound && !relocation ? weightedAverage(branchQty, oldAverage, line.quantity, movementCost) : oldAverage;
       await db.query(`INSERT INTO inv_existencia(producto_id,ubicacion_id,almacen_id,sucursal_id,cantidad,ultimo_movimiento_at)
         VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE cantidad=VALUES(cantidad),ultimo_movimiento_at=VALUES(ultimo_movimiento_at)`,
         [line.productId, line.locationId, line.warehouseId, branchId, fromUnits(newLocationQty), now]);
-      await db.query(`INSERT INTO inv_costo_sucursal(producto_id,sucursal_id,costo_promedio,ultimo_costo)
+      if (!relocation) await db.query(`INSERT INTO inv_costo_sucursal(producto_id,sucursal_id,costo_promedio,ultimo_costo)
         VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE costo_promedio=VALUES(costo_promedio),ultimo_costo=VALUES(ultimo_costo)`,
         [line.productId, branchId, fromUnits(newAverage), fromUnits(inbound ? movementCost : (costRows.length ? toUnits(costRows[0].ultimo_costo) : 0n))]);
       const [detail] = await db.query(`INSERT INTO inv_documento_detalle(documento_id,sucursal_id,producto_id,almacen_id,ubicacion_id,cantidad,costo_unitario)
@@ -104,7 +107,7 @@ async function applyDocument(input, userId, externalConnection = null) {
         VALUES (?,?,?,?,?,?,?,?,?,?)`, [detail.insertId, branchId, line.productId, line.locationId, line.warehouseId,
         fromUnits(inbound ? line.quantity : -line.quantity), fromUnits(movementCost), fromUnits(newLocationQty), fromUnits(newAverage), userId]);
     }
-    await syncInventoryAlerts(db, [branchId], now);
+    if (!relocation) await syncInventoryAlerts(db, [branchId], now);
     if (ownConnection) await db.commit();
     return { id: Number(documentId), folio, duplicated: false };
   } catch (error) {

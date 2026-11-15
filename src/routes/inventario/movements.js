@@ -4,9 +4,15 @@ const { pool } = require('../../config/db');
 const asyncHandler = require('../../utils/asyncHandler');
 const { resolveInventoryScope, inventoryScopeSql } = require('../../utils/inventoryAccess');
 const { applyDocument } = require('../../services/inventoryMovement');
+const { relocateStock } = require('../../services/inventoryRelocation');
 
 const id = Joi.number().integer().min(1).max(Number.MAX_SAFE_INTEGER).required();
 const decimal = Joi.string().pattern(/^(0|[1-9]\d{0,11})(\.\d{1,6})?$/).required();
+const relocationSchema = Joi.object({
+  sucursal_id: id, producto_id: id, ubicacion_origen_id: id, ubicacion_destino_id: id,
+  cantidad: decimal, motivo: Joi.string().trim().min(1).max(500).required(),
+  idempotencia: Joi.string().pattern(/^[A-Za-z0-9_.:-]{16,80}$/).required(),
+});
 const documentSchema = Joi.object({
   sucursal_id: id,
   tipo: Joi.string().valid('INICIAL', 'ENTRADA', 'SALIDA', 'DEVOLUCION').required(),
@@ -65,7 +71,12 @@ router.get('/kardex', asyncHandler(async (req, res) => {
   const where = conditions.join(' AND ');
   const [[count]] = await pool.query(`SELECT COUNT(*) total FROM inv_movimiento i JOIN inv_documento_detalle dd ON dd.id=i.detalle_id JOIN inv_documento d ON d.id=dd.documento_id JOIN inv_producto p ON p.id=i.producto_id WHERE ${where}`, params);
   const [items] = await pool.query(`SELECT i.id,i.sucursal_id,i.producto_id,i.cantidad_delta,i.costo_unitario,i.saldo_posterior,i.costo_promedio_posterior,i.created_at,
-      p.sku,p.nombre_comercial,d.folio,d.tipo,d.motivo,d.referencia,d.fecha_operacion,u.codigo ubicacion_codigo,a.nombre almacen_nombre,usr.nombre usuario_nombre
+      p.sku,p.nombre_comercial,d.folio,d.tipo,d.motivo,d.referencia,d.fecha_operacion,u.codigo ubicacion_codigo,a.nombre almacen_nombre,usr.nombre usuario_nombre,
+      CASE WHEN (d.tipo='TRANSFERENCIA_ENTRADA' AND EXISTS (SELECT 1 FROM inv_documento origen
+        WHERE origen.id=d.documento_origen_id AND origen.tipo='TRANSFERENCIA_SALIDA' AND origen.sucursal_id=d.sucursal_id))
+        OR (d.tipo='TRANSFERENCIA_SALIDA' AND EXISTS (SELECT 1 FROM inv_documento destino
+        WHERE destino.documento_origen_id=d.id AND destino.tipo='TRANSFERENCIA_ENTRADA' AND destino.sucursal_id=d.sucursal_id))
+        THEN d.referencia ELSE NULL END traslado_folio
     FROM inv_movimiento i JOIN inv_documento_detalle dd ON dd.id=i.detalle_id JOIN inv_documento d ON d.id=dd.documento_id
     JOIN inv_producto p ON p.id=i.producto_id JOIN inv_ubicacion u ON u.id=i.ubicacion_id JOIN inv_almacen a ON a.id=i.almacen_id JOIN usuario usr ON usr.id=i.usuario_id
     WHERE ${where} ORDER BY d.fecha_operacion DESC,i.id DESC LIMIT :limit OFFSET :offset`, params);
@@ -77,6 +88,13 @@ router.post('/movimientos', asyncHandler(async (req, res) => {
   await resolveInventoryScope(req.user, body.sucursal_id, pool);
   if (body.tipo === 'INICIAL' && (!req.user.is_admin && !req.user.is_inventory_admin)) throw Object.assign(new Error('Solo el administrador global o de inventario puede registrar inventario inicial.'), { status: 403 });
   const result = await applyDocument(body, Number(req.user.sub));
+  res.status(result.duplicated ? 200 : 201).json(result);
+}));
+
+router.post('/traslados-internos', asyncHandler(async (req, res) => {
+  const body = validate(relocationSchema, req.body);
+  await resolveInventoryScope(req.user, body.sucursal_id, pool);
+  const result = await relocateStock(body, Number(req.user.sub));
   res.status(result.duplicated ? 200 : 201).json(result);
 }));
 

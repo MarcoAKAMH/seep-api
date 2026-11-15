@@ -66,7 +66,7 @@ test('authenticated inventory accounts are denied on every non-inventory router'
           assert.equal(denied.status, 403);
           await denied.arrayBuffer();
         }
-        for (const route of ['productos', 'catalogos', 'productos/1', 'productos/1/limites', 'fotos', 'movimientos', 'existencias', 'kardex', 'tablero', 'almacenes', 'ubicaciones', 'proveedores', 'alertas', 'compras/ordenes', 'conteos', 'transferencias', 'ajustes', 'reportes/rotacion']) {
+        for (const route of ['productos', 'catalogos', 'productos/1', 'productos/1/limites', 'fotos', 'movimientos', 'traslados-internos', 'existencias', 'kardex', 'tablero', 'almacenes', 'ubicaciones', 'proveedores', 'alertas', 'compras/ordenes', 'conteos', 'transferencias', 'ajustes', 'reportes/rotacion']) {
           for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
             if (method === 'GET' && ['productos', 'catalogos', 'existencias'].includes(route)) continue;
             const response = await fetch(`${base}/inventario/${route}`, { method, headers });
